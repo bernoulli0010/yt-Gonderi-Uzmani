@@ -2301,10 +2301,12 @@ function wire() {
   }
 
   // User Dropdown
-  $("userProfileBtn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    if ($("userDropdown")) $("userDropdown").classList.toggle("is-open");
-  });
+  if ($("userProfileBtn")) {
+    $("userProfileBtn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if ($("userDropdown")) $("userDropdown").classList.toggle("is-open");
+    });
+  }
 
   document.addEventListener("click", () => {
     $("userDropdown")?.classList.remove("is-open");
@@ -2317,7 +2319,9 @@ function wire() {
   }
 
   // Modal Overlay Close
-  $("modalOverlay").addEventListener("click", Modals.closeAll);
+  if ($("modalOverlay")) {
+    $("modalOverlay").addEventListener("click", Modals.closeAll);
+  }
 
   // ESC key closes modals
   document.addEventListener("keydown", (e) => {
