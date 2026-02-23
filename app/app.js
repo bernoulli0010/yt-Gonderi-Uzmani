@@ -1279,8 +1279,8 @@ function switchSource(source) {
 /* ── Language System ── */
 function setLanguage(lang) {
   document.documentElement.lang = lang;
-  $("langTr").classList.toggle("is-active", lang === "tr");
-  $("langEn").classList.toggle("is-active", lang === "en");
+  if ($("langTr")) $("langTr").classList.toggle("is-active", lang === "tr");
+  if ($("langEn")) $("langEn").classList.toggle("is-active", lang === "en");
 
   const t = UI[lang];
   document.title = t.appTitle;
@@ -1921,15 +1921,18 @@ const AIService = {
 /* ── Wire Events ── */
 function wire() {
   // Language buttons
-  // Language buttons
-  $("langTr").addEventListener("click", () => {
-    setLanguage("tr");
-    saveState();
-  });
-  $("langEn").addEventListener("click", () => {
-    setLanguage("en");
-    saveState();
-  });
+  if ($("langTr")) {
+    $("langTr").addEventListener("click", () => {
+      setLanguage("tr");
+      saveState();
+    });
+  }
+  if ($("langEn")) {
+    $("langEn").addEventListener("click", () => {
+      setLanguage("en");
+      saveState();
+    });
+  }
 
 
 
@@ -2075,19 +2078,31 @@ function wire() {
 
   /* ── Auth Wiring ── */
   // Login Open/Close
-  $("loginBtn").addEventListener("click", () => Modals.open("loginModal"));
-  $("loginClose").addEventListener("click", Modals.closeAll);
+  if ($("loginBtn")) {
+    $("loginBtn").addEventListener("click", () => Modals.open("loginModal"));
+  }
+  if ($("loginClose")) {
+    $("loginClose").addEventListener("click", Modals.closeAll);
+  }
 
   // Register Open/Close
-  $("registerBtn").addEventListener("click", () => Modals.open("registerModal"));
-  $("registerClose").addEventListener("click", Modals.closeAll);
+  if ($("registerBtn")) {
+    $("registerBtn").addEventListener("click", () => Modals.open("registerModal"));
+  }
+  if ($("registerClose")) {
+    $("registerClose").addEventListener("click", Modals.closeAll);
+  }
 
   // Buy Open/Close
-  $("buyTokensBtn").addEventListener("click", () => {
-    $("userDropdown").classList.remove("is-open");
-    Modals.open("buyTokensModal");
-  });
-  $("buyTokensClose").addEventListener("click", Modals.closeAll);
+  if ($("buyTokensBtn")) {
+    $("buyTokensBtn").addEventListener("click", () => {
+      $("userDropdown").classList.remove("is-open");
+      Modals.open("buyTokensModal");
+    });
+  }
+  if ($("buyTokensClose")) {
+    $("buyTokensClose").addEventListener("click", Modals.closeAll);
+  }
 
   // Switchers
   $("swToRegister").addEventListener("click", (e) => {
@@ -2288,16 +2303,18 @@ function wire() {
   // User Dropdown
   $("userProfileBtn").addEventListener("click", (e) => {
     e.stopPropagation();
-    $("userDropdown").classList.toggle("is-open");
+    if ($("userDropdown")) $("userDropdown").classList.toggle("is-open");
   });
 
   document.addEventListener("click", () => {
     $("userDropdown")?.classList.remove("is-open");
   });
 
-  $("logoutBtn").addEventListener("click", () => {
-    AuthService.logout();
-  });
+  if ($("logoutBtn")) {
+    $("logoutBtn").addEventListener("click", () => {
+      AuthService.logout();
+    });
+  }
 
   // Modal Overlay Close
   $("modalOverlay").addEventListener("click", Modals.closeAll);
