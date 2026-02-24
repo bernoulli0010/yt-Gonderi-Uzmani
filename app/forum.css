@@ -454,6 +454,7 @@
 
 .forum-group-body {
   overflow: hidden;
+  max-height: 2000px;
   transition: max-height 0.3s ease;
 }
 

@@ -832,6 +832,10 @@ const Forum = {
       }
 
       if (!data || data.length === 0) {
+        if (this.threadPage > 0) {
+          this.threadPage--;
+          return this.loadCategory();
+        }
         container.innerHTML = '<div class="forum-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><p>Bu kategoride henuz konu yok.</p></div>';
         $("threadPagination").innerHTML = "";
         return;
@@ -959,8 +963,15 @@ const Forum = {
       const roleBadgeText = authorRole === "admin" ? "Admin" : authorRole === "moderator" ? "Moderator" : "Kullanici";
 
       // Count author stats
-      const { count: authorThreadCount } = await supabaseClient.from("forum_threads").select("id", { count: "exact", head: true }).eq("user_id", author?.id);
-      const { count: authorReplyCount } = await supabaseClient.from("forum_replies").select("id", { count: "exact", head: true }).eq("user_id", author?.id);
+      let authorThreadCount = 0, authorReplyCount = 0;
+      if (author?.id) {
+        const [tc, rc] = await Promise.all([
+          supabaseClient.from("forum_threads").select("id", { count: "exact", head: true }).eq("user_id", author.id),
+          supabaseClient.from("forum_replies").select("id", { count: "exact", head: true }).eq("user_id", author.id)
+        ]);
+        authorThreadCount = tc.count || 0;
+        authorReplyCount = rc.count || 0;
+      }
 
       // Mod actions
       const canMod = AuthService.isModOrAdmin();
