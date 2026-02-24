@@ -934,16 +934,24 @@ const Forum = {
         .eq("thread_id", thread.id)
         .order("created_at", { ascending: true });
 
-      // Check if user liked this thread + batch-fetch reply likes
+      // Check if user liked this thread + batch-fetch reply likes for this thread
       let userLikedThread = false;
       let userLikedReplies = new Set();
       if (AuthService.currentUser) {
-        const [threadLikeRes, replyLikesRes] = await Promise.all([
-          supabaseClient.from("forum_likes").select("id").eq("user_id", AuthService.currentUser.id).eq("thread_id", thread.id).maybeSingle(),
-          supabaseClient.from("forum_likes").select("reply_id").eq("user_id", AuthService.currentUser.id).not("reply_id", "is", null)
-        ]);
-        userLikedThread = !!threadLikeRes.data;
-        userLikedReplies = new Set((replyLikesRes.data || []).map(l => l.reply_id));
+        const replyIds = (replies || []).map(r => r.id);
+        const promises = [
+          supabaseClient.from("forum_likes").select("id").eq("user_id", AuthService.currentUser.id).eq("thread_id", thread.id).maybeSingle()
+        ];
+        if (replyIds.length > 0) {
+          promises.push(
+            supabaseClient.from("forum_likes").select("reply_id").eq("user_id", AuthService.currentUser.id).in("reply_id", replyIds)
+          );
+        }
+        const results = await Promise.all(promises);
+        userLikedThread = !!results[0].data;
+        if (results[1]) {
+          userLikedReplies = new Set((results[1].data || []).map(l => l.reply_id));
+        }
       }
 
       // Breadcrumb
@@ -1192,18 +1200,20 @@ const Forum = {
 
   async togglePin(threadId, pin) {
     try {
-      await supabaseClient.from("forum_threads").update({ is_pinned: pin }).eq("id", threadId);
+      const { error } = await supabaseClient.from("forum_threads").update({ is_pinned: pin }).eq("id", threadId);
+      if (error) { toast("Hata: " + error.message); return; }
       toast(pin ? "Konu sabitlendi." : "Sabitleme kaldirildi.");
       this.loadThread();
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); toast("Islem basarisiz."); }
   },
 
   async toggleLock(threadId, lock) {
     try {
-      await supabaseClient.from("forum_threads").update({ is_locked: lock }).eq("id", threadId);
+      const { error } = await supabaseClient.from("forum_threads").update({ is_locked: lock }).eq("id", threadId);
+      if (error) { toast("Hata: " + error.message); return; }
       toast(lock ? "Konu kilitlendi." : "Kilit acildi.");
       this.loadThread();
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); toast("Islem basarisiz."); }
   },
 
   async deleteThread(threadId) {
@@ -1586,7 +1596,17 @@ const AdminPanel = {
   },
 
   async moveGroup(id, newOrder) {
-    await supabaseClient.from("forum_category_groups").update({ sort_order: newOrder }).eq("id", id);
+    // Swap sort_order with the group currently at newOrder
+    const { data: target } = await supabaseClient.from("forum_category_groups").select("id, sort_order").eq("sort_order", newOrder).maybeSingle();
+    const { data: current } = await supabaseClient.from("forum_category_groups").select("sort_order").eq("id", id).single();
+    if (target && current) {
+      await Promise.all([
+        supabaseClient.from("forum_category_groups").update({ sort_order: newOrder }).eq("id", id),
+        supabaseClient.from("forum_category_groups").update({ sort_order: current.sort_order }).eq("id", target.id)
+      ]);
+    } else {
+      await supabaseClient.from("forum_category_groups").update({ sort_order: newOrder }).eq("id", id);
+    }
     this.loadGroups();
   },
 
