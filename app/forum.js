@@ -52,6 +52,12 @@ function esc(str) {
   return d.innerHTML;
 }
 
+/* ── Escape for inline JS attribute (onclick etc.) ── */
+function escAttr(str) {
+  if (!str) return "";
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
 /* ═══════════════════════════════════════════════════════════
    AUTH SERVICE
    ═══════════════════════════════════════════════════════════ */
@@ -869,15 +875,8 @@ const Forum = {
 
       if (error) { toast("Cevap gonderilirken hata olustu."); console.error(error); return; }
 
-      // Update thread cache
+      // Update thread reply count and last reply info
       const userName = AuthService.currentUser.name;
-      await supabaseClient.from("forum_threads").update({
-        reply_count: supabaseClient.rpc ? undefined : undefined, // Let's do a simple increment approach
-        last_reply_user: userName,
-        last_reply_at: new Date().toISOString()
-      }).eq("id", threadId);
-
-      // Increment reply_count manually
       const { data: threadData } = await supabaseClient.from("forum_threads").select("reply_count, category_id, user_id").eq("id", threadId).single();
       if (threadData) {
         await supabaseClient.from("forum_threads").update({
@@ -1275,6 +1274,12 @@ const Notifications = {
     await supabaseClient.from("forum_notifications").update({ is_read: true }).eq("user_id", AuthService.currentUser.id).eq("is_read", false);
     toast("Tum bildirimler okundu.");
     this.load();
+  },
+
+  _pollInterval: null,
+  startPolling() {
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    this._pollInterval = setInterval(() => this.load(), 30000);
   }
 };
 
@@ -1314,7 +1319,7 @@ const AdminPanel = {
           <div class="admin-item">
             <span class="admin-item-name">${esc(g.name)}</span>
             <div class="admin-item-actions">
-              <button onclick="AdminPanel.editItem('group', '${g.id}', '${esc(g.name)}')">Duzenle</button>
+              <button onclick="AdminPanel.editItem('group', '${g.id}', '${escAttr(g.name)}')">Duzenle</button>
               ${i > 0 ? `<button onclick="AdminPanel.moveGroup('${g.id}', ${g.sort_order - 1})">&#9650;</button>` : ""}
               ${i < groups.length - 1 ? `<button onclick="AdminPanel.moveGroup('${g.id}', ${g.sort_order + 1})">&#9660;</button>` : ""}
               <button class="danger" onclick="AdminPanel.deleteGroup('${g.id}')">Sil</button>
@@ -1387,7 +1392,7 @@ const AdminPanel = {
             <div class="admin-item">
               <span class="admin-item-name">${cat.icon || "&#128172;"} ${esc(cat.name)}</span>
               <div class="admin-item-actions">
-                <button onclick="AdminPanel.editItem('category', '${cat.id}', '${esc(cat.name)}', '${esc(cat.description || '')}', '${cat.icon || ''}')">Duzenle</button>
+                <button onclick="AdminPanel.editItem('category', '${cat.id}', '${escAttr(cat.name)}', '${escAttr(cat.description || '')}', '${escAttr(cat.icon || '')}')">Duzenle</button>
                 <button class="danger" onclick="AdminPanel.deleteCategory('${cat.id}')">Sil</button>
               </div>
             </div>`;
@@ -1399,7 +1404,7 @@ const AdminPanel = {
               html += `<div class="admin-item">
                 <span class="admin-item-name">\u{1F4C1} ${esc(s.name)}</span>
                 <div class="admin-item-actions">
-                  <button onclick="AdminPanel.editItem('subcategory', '${s.id}', '${esc(s.name)}')">Duzenle</button>
+                  <button onclick="AdminPanel.editItem('subcategory', '${s.id}', '${escAttr(s.name)}')">Duzenle</button>
                   <button class="danger" onclick="AdminPanel.deleteSubcategory('${s.id}')">Sil</button>
                 </div>
               </div>`;
@@ -1599,7 +1604,7 @@ function wire() {
     const btn = $("loginSubmitBtn");
     btn.disabled = true; btn.textContent = "Giris yapiliyor...";
     const ok = await AuthService.login($("loginEmail").value, $("loginPassword").value);
-    if (ok) { ForumModals.close(); toast("Giris yapildi!"); Notifications.load(); Forum.loadHome(); }
+    if (ok) { ForumModals.close(); toast("Giris yapildi!"); Notifications.load(); Notifications.startPolling(); Forum.loadHome(); }
     btn.disabled = false; btn.textContent = "Giris Yap";
   });
 
@@ -1732,8 +1737,7 @@ async function init() {
   // Load notifications
   if (AuthService.currentUser) {
     Notifications.load();
-    // Poll notifications every 30s
-    setInterval(() => Notifications.load(), 30000);
+    Notifications.startPolling();
   }
 }
 
