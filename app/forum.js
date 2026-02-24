@@ -647,8 +647,8 @@ const Forum = {
         return;
       }
 
-      // Increment view count
-      supabaseClient.from("forum_threads").update({ view_count: (thread.view_count || 0) + 1 }).eq("id", thread.id).then();
+      // Increment view count via RPC
+      supabaseClient.rpc("forum_increment_view", { p_thread_id: thread.id }).then();
 
       // Fetch replies
       const { data: replies, error: rErr } = await supabaseClient
@@ -657,16 +657,16 @@ const Forum = {
         .eq("thread_id", thread.id)
         .order("created_at", { ascending: true });
 
-      // Check if user liked this thread
+      // Check if user liked this thread + batch-fetch reply likes
       let userLikedThread = false;
+      let userLikedReplies = new Set();
       if (AuthService.currentUser) {
-        const { data: likeData } = await supabaseClient
-          .from("forum_likes")
-          .select("id")
-          .eq("user_id", AuthService.currentUser.id)
-          .eq("thread_id", thread.id)
-          .maybeSingle();
-        userLikedThread = !!likeData;
+        const [threadLikeRes, replyLikesRes] = await Promise.all([
+          supabaseClient.from("forum_likes").select("id").eq("user_id", AuthService.currentUser.id).eq("thread_id", thread.id).maybeSingle(),
+          supabaseClient.from("forum_likes").select("reply_id").eq("user_id", AuthService.currentUser.id).not("reply_id", "is", null)
+        ]);
+        userLikedThread = !!threadLikeRes.data;
+        userLikedReplies = new Set((replyLikesRes.data || []).map(l => l.reply_id));
       }
 
       // Breadcrumb
@@ -754,7 +754,7 @@ const Forum = {
         <div class="replies-header"><h3>${allReplies.length} Cevap</h3></div>`;
 
       for (const reply of topReplies) {
-        html += await this.renderReply(reply, allReplies);
+        html += this.renderReply(reply, allReplies, userLikedReplies);
       }
 
       // Reply compose
@@ -785,7 +785,7 @@ const Forum = {
     }
   },
 
-  async renderReply(reply, allReplies) {
+  renderReply(reply, allReplies, userLikedReplies) {
     const author = reply.profiles;
     const authorName = author?.full_name || author?.email?.split("@")[0] || "Anonim";
     const initial = (authorName || "A")[0].toUpperCase();
@@ -795,17 +795,7 @@ const Forum = {
     const isNested = !!reply.parent_id;
     const canDelete = AuthService.isModOrAdmin() || AuthService.currentUser?.id === reply.user_id;
 
-    // Check if user liked
-    let userLiked = false;
-    if (AuthService.currentUser) {
-      const { data: likeData } = await supabaseClient
-        .from("forum_likes")
-        .select("id")
-        .eq("user_id", AuthService.currentUser.id)
-        .eq("reply_id", reply.id)
-        .maybeSingle();
-      userLiked = !!likeData;
-    }
+    const userLiked = userLikedReplies.has(reply.id);
 
     let html = `
       <div class="reply-card${isNested ? ' nested' : ''}">
@@ -840,7 +830,7 @@ const Forum = {
     // Render child replies
     const children = allReplies.filter(r => r.parent_id === reply.id);
     for (const child of children) {
-      html += await this.renderReply(child, allReplies);
+      html += this.renderReply(child, allReplies, userLikedReplies);
     }
 
     return html;
@@ -875,37 +865,21 @@ const Forum = {
 
       if (error) { toast("Cevap gonderilirken hata olustu."); console.error(error); return; }
 
-      // Update thread reply count and last reply info
+      // Update counters via RPC (atomic, secure)
       const userName = AuthService.currentUser.name;
-      const { data: threadData } = await supabaseClient.from("forum_threads").select("reply_count, category_id, user_id").eq("id", threadId).single();
-      if (threadData) {
-        await supabaseClient.from("forum_threads").update({
-          reply_count: (threadData.reply_count || 0) + 1,
-          last_reply_user: userName,
-          last_reply_at: new Date().toISOString()
-        }).eq("id", threadId);
+      const { data: threadData } = await supabaseClient.from("forum_threads").select("category_id, user_id, title").eq("id", threadId).single();
 
-        // Update category cache
-        const { data: catData } = await supabaseClient.from("forum_categories").select("reply_count").eq("id", threadData.category_id).single();
-        if (catData) {
-          await supabaseClient.from("forum_categories").update({
-            reply_count: (catData.reply_count || 0) + 1,
-            last_reply_user: userName,
-            last_reply_at: new Date().toISOString()
-          }).eq("id", threadData.category_id);
-        }
+      await supabaseClient.rpc("forum_on_reply", { p_thread_id: threadId, p_user_name: userName });
+
+      if (threadData) {
+        await supabaseClient.rpc("forum_on_category_reply", { p_category_id: threadData.category_id, p_user_name: userName });
 
         // Create notification for thread owner
         if (threadData.user_id !== AuthService.currentUser.id) {
-          const { data: tInfo } = await supabaseClient.from("forum_threads").select("title").eq("id", threadId).single();
           await supabaseClient.from("forum_notifications").insert({
-            user_id: threadData.user_id,
-            type: "reply",
-            from_user_id: AuthService.currentUser.id,
-            from_user_name: userName,
-            thread_id: threadId,
-            thread_title: tInfo?.title || "",
-            reply_id: data.id
+            user_id: threadData.user_id, type: "reply",
+            from_user_id: AuthService.currentUser.id, from_user_name: userName,
+            thread_id: threadId, thread_title: threadData.title || "", reply_id: data.id
           });
         }
 
@@ -913,15 +887,10 @@ const Forum = {
         if (parentId) {
           const { data: parentReply } = await supabaseClient.from("forum_replies").select("user_id").eq("id", parentId).single();
           if (parentReply && parentReply.user_id !== AuthService.currentUser.id) {
-            const { data: tInfo } = await supabaseClient.from("forum_threads").select("title").eq("id", threadId).single();
             await supabaseClient.from("forum_notifications").insert({
-              user_id: parentReply.user_id,
-              type: "reply",
-              from_user_id: AuthService.currentUser.id,
-              from_user_name: userName,
-              thread_id: threadId,
-              thread_title: tInfo?.title || "",
-              reply_id: data.id
+              user_id: parentReply.user_id, type: "reply",
+              from_user_id: AuthService.currentUser.id, from_user_name: userName,
+              thread_id: threadId, thread_title: threadData.title || "", reply_id: data.id
             });
           }
         }
@@ -959,15 +928,9 @@ const Forum = {
 
       await supabaseClient.from("forum_threads").delete().eq("id", threadId);
 
-      // Update category counts
+      // Update category counts via RPC
       if (thread) {
-        const { data: catData } = await supabaseClient.from("forum_categories").select("thread_count, reply_count").eq("id", thread.category_id).single();
-        if (catData) {
-          await supabaseClient.from("forum_categories").update({
-            thread_count: Math.max(0, (catData.thread_count || 0) - 1),
-            reply_count: Math.max(0, (catData.reply_count || 0) - (thread.reply_count || 0))
-          }).eq("id", thread.category_id);
-        }
+        await supabaseClient.rpc("forum_on_thread_delete", { p_category_id: thread.category_id, p_reply_count: thread.reply_count || 0 });
       }
 
       toast("Konu silindi.");
@@ -983,15 +946,12 @@ const Forum = {
 
       await supabaseClient.from("forum_replies").delete().eq("id", replyId);
 
-      // Update thread count
+      // Update counts via RPC
       if (reply) {
-        const { data: tData } = await supabaseClient.from("forum_threads").select("reply_count, category_id").eq("id", reply.thread_id).single();
+        const { data: tData } = await supabaseClient.from("forum_threads").select("category_id").eq("id", reply.thread_id).single();
+        await supabaseClient.rpc("forum_on_reply_delete", { p_thread_id: reply.thread_id });
         if (tData) {
-          await supabaseClient.from("forum_threads").update({ reply_count: Math.max(0, (tData.reply_count || 0) - 1) }).eq("id", reply.thread_id);
-          const { data: cData } = await supabaseClient.from("forum_categories").select("reply_count").eq("id", tData.category_id).single();
-          if (cData) {
-            await supabaseClient.from("forum_categories").update({ reply_count: Math.max(0, (cData.reply_count || 0) - 1) }).eq("id", tData.category_id);
-          }
+          await supabaseClient.rpc("forum_on_cat_reply_delete", { p_category_id: tData.category_id });
         }
       }
 
@@ -1013,14 +973,13 @@ const Forum = {
 
       if (existing) {
         await supabaseClient.from("forum_likes").delete().eq("id", existing.id);
-        const { data: t } = await supabaseClient.from("forum_threads").select("like_count").eq("id", threadId).single();
-        await supabaseClient.from("forum_threads").update({ like_count: Math.max(0, (t?.like_count || 0) - 1) }).eq("id", threadId);
+        await supabaseClient.rpc("forum_update_thread_likes", { p_thread_id: threadId, p_delta: -1 });
       } else {
         await supabaseClient.from("forum_likes").insert({ user_id: AuthService.currentUser.id, thread_id: threadId });
-        const { data: t } = await supabaseClient.from("forum_threads").select("like_count, user_id, title").eq("id", threadId).single();
-        await supabaseClient.from("forum_threads").update({ like_count: (t?.like_count || 0) + 1 }).eq("id", threadId);
+        await supabaseClient.rpc("forum_update_thread_likes", { p_thread_id: threadId, p_delta: 1 });
 
         // Notification
+        const { data: t } = await supabaseClient.from("forum_threads").select("user_id, title").eq("id", threadId).single();
         if (t && t.user_id !== AuthService.currentUser.id) {
           await supabaseClient.from("forum_notifications").insert({
             user_id: t.user_id, type: "like",
@@ -1046,14 +1005,13 @@ const Forum = {
 
       if (existing) {
         await supabaseClient.from("forum_likes").delete().eq("id", existing.id);
-        const { data: r } = await supabaseClient.from("forum_replies").select("like_count").eq("id", replyId).single();
-        await supabaseClient.from("forum_replies").update({ like_count: Math.max(0, (r?.like_count || 0) - 1) }).eq("id", replyId);
+        await supabaseClient.rpc("forum_update_reply_likes", { p_reply_id: replyId, p_delta: -1 });
       } else {
         await supabaseClient.from("forum_likes").insert({ user_id: AuthService.currentUser.id, reply_id: replyId });
-        const { data: r } = await supabaseClient.from("forum_replies").select("like_count, user_id, thread_id").eq("id", replyId).single();
-        await supabaseClient.from("forum_replies").update({ like_count: (r?.like_count || 0) + 1 }).eq("id", replyId);
+        await supabaseClient.rpc("forum_update_reply_likes", { p_reply_id: replyId, p_delta: 1 });
 
         // Notification
+        const { data: r } = await supabaseClient.from("forum_replies").select("user_id, thread_id").eq("id", replyId).single();
         if (r && r.user_id !== AuthService.currentUser.id) {
           const { data: tInfo } = await supabaseClient.from("forum_threads").select("title").eq("id", r.thread_id).single();
           await supabaseClient.from("forum_notifications").insert({
@@ -1141,24 +1099,15 @@ const Forum = {
 
       if (error) { toast("Konu olusturulurken hata: " + error.message); console.error(error); return; }
 
-      // Update category cache
-      const { data: catData } = await supabaseClient.from("forum_categories").select("thread_count").eq("id", categoryId).single();
-      if (catData) {
-        await supabaseClient.from("forum_categories").update({
-          thread_count: (catData.thread_count || 0) + 1,
-          last_thread_id: data.id,
-          last_thread_title: title,
-          last_reply_user: AuthService.currentUser.name,
-          last_reply_at: new Date().toISOString()
-        }).eq("id", categoryId);
-      }
+      // Update category stats via RPC
+      await supabaseClient.rpc("forum_on_new_thread", {
+        p_category_id: categoryId, p_thread_id: data.id,
+        p_title: title, p_user_name: AuthService.currentUser.name
+      });
 
-      // Update subcategory count
+      // Update subcategory count via RPC
       if (subcategoryId) {
-        const { data: subData } = await supabaseClient.from("forum_subcategories").select("thread_count").eq("id", subcategoryId).single();
-        if (subData) {
-          await supabaseClient.from("forum_subcategories").update({ thread_count: (subData.thread_count || 0) + 1 }).eq("id", subcategoryId);
-        }
+        await supabaseClient.rpc("forum_inc_sub_threads", { p_sub_id: subcategoryId });
       }
 
       ForumModals.close();
