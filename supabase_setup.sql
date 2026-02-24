@@ -44,7 +44,7 @@ create trigger on_auth_user_created
 
 -- Posts table
 create table public.posts (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) not null,
   content text,
   meta_data jsonb,
@@ -64,7 +64,7 @@ with check ( auth.uid() = user_id );
 
 -- Token Purchases table (Shopier integration log)
 create table public.token_purchases (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   shopier_order_id text unique not null,
   shopier_webhook_id text,
   user_id uuid references public.profiles(id),
@@ -106,7 +106,7 @@ using ( auth.uid() = user_id );
 
 -- ── Forum Category Groups ──
 create table public.forum_category_groups (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   name text not null,
   sort_order integer default 0,
   is_collapsed boolean default false,
@@ -138,7 +138,7 @@ create policy "Admin can delete forum groups"
 
 -- ── Forum Categories ──
 create table public.forum_categories (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   group_id uuid references public.forum_category_groups(id) on delete cascade not null,
   name text not null,
   description text,
@@ -178,7 +178,7 @@ create policy "Admin can delete forum categories"
 
 -- ── Forum Subcategories ──
 create table public.forum_subcategories (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   category_id uuid references public.forum_categories(id) on delete cascade not null,
   name text not null,
   sort_order integer default 0,
@@ -211,7 +211,7 @@ create policy "Admin can delete forum subcategories"
 
 -- ── Forum Threads ──
 create table public.forum_threads (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   category_id uuid references public.forum_categories(id) on delete cascade not null,
   subcategory_id uuid references public.forum_subcategories(id) on delete set null,
   user_id uuid references public.profiles(id) not null,
@@ -254,7 +254,7 @@ create policy "Owner or mod/admin can delete forum threads"
 
 -- ── Forum Replies ──
 create table public.forum_replies (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   thread_id uuid references public.forum_threads(id) on delete cascade not null,
   user_id uuid references public.profiles(id) not null,
   content text not null,
@@ -289,7 +289,7 @@ create policy "Owner or mod/admin can delete forum replies"
 
 -- ── Forum Likes ──
 create table public.forum_likes (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) not null,
   thread_id uuid references public.forum_threads(id) on delete cascade,
   reply_id uuid references public.forum_replies(id) on delete cascade,
@@ -317,7 +317,7 @@ create policy "Users can delete own forum likes"
 
 -- ── Forum Notifications ──
 create table public.forum_notifications (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   type text not null, -- 'reply', 'like', 'mention'
   from_user_id uuid references public.profiles(id),
