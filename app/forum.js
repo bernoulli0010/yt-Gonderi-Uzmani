@@ -59,6 +59,279 @@ function escAttr(str) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   BBCODE PARSER & SAFE CONTENT RENDERER
+   Security: first esc() all HTML, then parse only whitelisted BBCode
+   ═══════════════════════════════════════════════════════════ */
+const SUPABASE_STORAGE_HOST = "bjcsbuvjumaigvsjphor.supabase.co";
+
+function renderContent(raw) {
+  if (!raw) return "";
+  // 1. Escape ALL HTML first (prevents XSS)
+  let s = esc(raw);
+
+  // 2. Parse BBCode tags to safe HTML
+  // [b]...[/b]
+  s = s.replace(/\[b\]([\s\S]*?)\[\/b\]/gi, '<strong>$1</strong>');
+  // [i]...[/i]
+  s = s.replace(/\[i\]([\s\S]*?)\[\/i\]/gi, '<em>$1</em>');
+  // [u]...[/u]
+  s = s.replace(/\[u\]([\s\S]*?)\[\/u\]/gi, '<u>$1</u>');
+  // [s]...[/s]
+  s = s.replace(/\[s\]([\s\S]*?)\[\/s\]/gi, '<s>$1</s>');
+  // [code]...[/code]
+  s = s.replace(/\[code\]([\s\S]*?)\[\/code\]/gi, '<code class="forum-code">$1</code>');
+  // [quote]...[/quote]
+  s = s.replace(/\[quote\]([\s\S]*?)\[\/quote\]/gi, '<blockquote class="forum-quote">$1</blockquote>');
+  // [quote=name]...[/quote]
+  s = s.replace(/\[quote=([^\]]{1,50})\]([\s\S]*?)\[\/quote\]/gi, '<blockquote class="forum-quote"><cite>$1</cite>$2</blockquote>');
+  // [url=...]...[/url] - only http/https
+  s = s.replace(/\[url=(https?:\/\/[^\]]{1,500})\]([\s\S]*?)\[\/url\]/gi, (m, url, text) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="forum-link">${text}</a>`;
+  });
+  // [url]...[/url]
+  s = s.replace(/\[url\](https?:\/\/[^\[]{1,500})\[\/url\]/gi, (m, url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="forum-link">${url}</a>`;
+  });
+  // [img]...[/img] - ONLY allow our Supabase storage URLs
+  s = s.replace(/\[img\](https?:\/\/[^\[]{1,500})\[\/img\]/gi, (m, url) => {
+    try {
+      const u = new URL(url);
+      if (u.hostname === SUPABASE_STORAGE_HOST || u.hostname.endsWith('.supabase.co')) {
+        return `<img src="${url}" alt="forum-image" class="forum-img" loading="lazy" onclick="ForumEditor.previewImage('${url.replace(/'/g, "")}')" />`;
+      }
+    } catch {}
+    return `<span class="forum-img-blocked">[Harici resim engellendi]</span>`;
+  });
+  // [color=...]...[/color] - only safe color values
+  s = s.replace(/\[color=(#[0-9a-fA-F]{3,6}|[a-zA-Z]{1,20})\]([\s\S]*?)\[\/color\]/gi, '<span style="color:$1">$2</span>');
+
+  // 3. Convert newlines to <br>
+  s = s.replace(/\n/g, '<br>');
+
+  return s;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FORUM EDITOR - Toolbar + Image Upload
+   ═══════════════════════════════════════════════════════════ */
+const ForumEditor = {
+  ALLOWED_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  MAX_SIZE: 2 * 1024 * 1024, // 2MB
+  uploading: false,
+
+  /** Build toolbar HTML for a textarea */
+  buildToolbar(textareaId) {
+    return `
+      <div class="editor-toolbar" data-target="${textareaId}">
+        <button type="button" class="editor-btn" onclick="ForumEditor.wrap('${textareaId}','b')" title="Kalin">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>
+        </button>
+        <button type="button" class="editor-btn" onclick="ForumEditor.wrap('${textareaId}','i')" title="Italik">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+        </button>
+        <button type="button" class="editor-btn" onclick="ForumEditor.wrap('${textareaId}','u')" title="Alti Cizili">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+        </button>
+        <button type="button" class="editor-btn" onclick="ForumEditor.wrap('${textareaId}','s')" title="Ustu Cizili">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"/><path d="M17.5 7.5C17 5 15 4 12 4c-3 0-5 2-5 4 0 3 3 4 5 4.5 2 .5 5 1.5 5 4.5 0 2-2 4-5 4s-5-1-5.5-4"/></svg>
+        </button>
+        <span class="editor-sep"></span>
+        <button type="button" class="editor-btn" onclick="ForumEditor.insertQuote('${textareaId}')" title="Alinti">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button type="button" class="editor-btn" onclick="ForumEditor.wrap('${textareaId}','code')" title="Kod">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </button>
+        <button type="button" class="editor-btn" onclick="ForumEditor.insertLink('${textareaId}')" title="Link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
+        <span class="editor-sep"></span>
+        <button type="button" class="editor-btn editor-btn-img" onclick="ForumEditor.triggerUpload('${textareaId}')" title="Resim Yukle (maks 2MB)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Resim
+        </button>
+        <input type="file" id="fileInput-${textareaId}" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none;" onchange="ForumEditor.handleUpload(event, '${textareaId}')" />
+        <span class="editor-upload-status" id="uploadStatus-${textareaId}"></span>
+      </div>`;
+  },
+
+  /** Wrap selected text with BBCode tag */
+  wrap(textareaId, tag) {
+    const ta = $(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = ta.value;
+    const selected = text.substring(start, end);
+    const replacement = `[${tag}]${selected}[/${tag}]`;
+    ta.value = text.substring(0, start) + replacement + text.substring(end);
+    ta.focus();
+    ta.selectionStart = start + tag.length + 2;
+    ta.selectionEnd = start + tag.length + 2 + selected.length;
+  },
+
+  /** Insert quote BBCode */
+  insertQuote(textareaId) {
+    const ta = $(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = ta.value;
+    const selected = text.substring(start, end);
+    const replacement = `[quote]${selected || "Alinti metni..."}[/quote]\n`;
+    ta.value = text.substring(0, start) + replacement + text.substring(end);
+    ta.focus();
+  },
+
+  /** Insert link BBCode */
+  insertLink(textareaId) {
+    const url = prompt("URL girin:", "https://");
+    if (!url || url === "https://") return;
+    const ta = $(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = ta.value;
+    const selected = text.substring(start, end) || url;
+    const replacement = `[url=${url}]${selected}[/url]`;
+    ta.value = text.substring(0, start) + replacement + text.substring(end);
+    ta.focus();
+  },
+
+  /** Trigger file input click */
+  triggerUpload(textareaId) {
+    if (!AuthService.currentUser) { ForumModals.open("loginModal"); return; }
+    const fileInput = $(`fileInput-${textareaId}`);
+    if (fileInput) fileInput.click();
+  },
+
+  /** Handle image upload */
+  async handleUpload(event, textareaId) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const statusEl = $(`uploadStatus-${textareaId}`);
+    const setStatus = (msg, isError) => {
+      if (statusEl) {
+        statusEl.textContent = msg;
+        statusEl.className = `editor-upload-status ${isError ? 'error' : 'success'}`;
+        if (msg) setTimeout(() => { statusEl.textContent = ""; }, 4000);
+      }
+    };
+
+    // Client-side validation
+    if (!this.ALLOWED_TYPES.includes(file.type)) {
+      setStatus("Sadece JPEG, PNG, GIF, WebP yuklenir!", true);
+      event.target.value = "";
+      return;
+    }
+    if (file.size > this.MAX_SIZE) {
+      setStatus("Dosya 2MB'dan buyuk olamaz!", true);
+      event.target.value = "";
+      return;
+    }
+    if (this.uploading) {
+      setStatus("Yukleme devam ediyor...", true);
+      return;
+    }
+
+    // Validate file header (magic bytes)
+    const isValid = await this.validateMagicBytes(file);
+    if (!isValid) {
+      setStatus("Gecersiz dosya formati!", true);
+      event.target.value = "";
+      return;
+    }
+
+    this.uploading = true;
+    setStatus("Yukleniyor...", false);
+
+    try {
+      // Sanitize filename: userId/timestamp_random.ext
+      const ext = file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const safeExt = ['jpg','jpeg','png','gif','webp'].includes(ext) ? ext : 'jpg';
+      const userId = AuthService.currentUser.id;
+      const ts = Date.now();
+      const rand = Math.random().toString(36).substring(2, 8);
+      const path = `${userId}/${ts}_${rand}.${safeExt}`;
+
+      const { data, error } = await supabaseClient.storage
+        .from('forum-images')
+        .upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type
+        });
+
+      if (error) {
+        setStatus("Yukleme hatasi: " + error.message, true);
+        return;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabaseClient.storage
+        .from('forum-images')
+        .getPublicUrl(data.path);
+
+      if (urlData?.publicUrl) {
+        // Insert [img] BBCode into textarea
+        const ta = $(textareaId);
+        if (ta) {
+          const pos = ta.selectionStart;
+          const text = ta.value;
+          const imgTag = `[img]${urlData.publicUrl}[/img]\n`;
+          ta.value = text.substring(0, pos) + imgTag + text.substring(pos);
+          ta.focus();
+        }
+        setStatus("Resim yuklendi!", false);
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      setStatus("Yukleme sirasinda hata olustu.", true);
+    } finally {
+      this.uploading = false;
+      event.target.value = "";
+    }
+  },
+
+  /** Validate file magic bytes (JPEG, PNG, GIF, WebP) */
+  async validateMagicBytes(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = function() {
+        const arr = new Uint8Array(reader.result);
+        if (arr.length < 4) { resolve(false); return; }
+        // JPEG: FF D8 FF
+        if (arr[0] === 0xFF && arr[1] === 0xD8 && arr[2] === 0xFF) { resolve(true); return; }
+        // PNG: 89 50 4E 47
+        if (arr[0] === 0x89 && arr[1] === 0x50 && arr[2] === 0x4E && arr[3] === 0x47) { resolve(true); return; }
+        // GIF: 47 49 46
+        if (arr[0] === 0x47 && arr[1] === 0x49 && arr[2] === 0x46) { resolve(true); return; }
+        // WebP: 52 49 46 46 ... 57 45 42 50
+        if (arr.length >= 12 && arr[0] === 0x52 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x46 &&
+            arr[8] === 0x57 && arr[9] === 0x45 && arr[10] === 0x42 && arr[11] === 0x50) { resolve(true); return; }
+        resolve(false);
+      };
+      reader.readAsArrayBuffer(file.slice(0, 16));
+    });
+  },
+
+  /** Image preview lightbox */
+  previewImage(url) {
+    // Create a simple fullscreen preview
+    const overlay = document.createElement('div');
+    overlay.className = 'forum-img-preview-overlay';
+    overlay.innerHTML = `
+      <div class="forum-img-preview-wrap">
+        <img src="${esc(url)}" alt="preview" />
+        <button class="forum-img-preview-close" onclick="this.closest('.forum-img-preview-overlay').remove()">&times;</button>
+      </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════
    AUTH SERVICE
    ═══════════════════════════════════════════════════════════ */
 const AuthService = {
@@ -732,7 +1005,7 @@ const Forum = {
               </div>
             </div>
             <div class="thread-content-area">
-              <div class="thread-content-text">${esc(thread.content)}</div>
+              <div class="thread-content-text">${renderContent(thread.content)}</div>
               ${tagsHtml}
               <div class="thread-footer-bar">
                 <button class="like-btn${userLikedThread ? ' liked' : ''}" onclick="Forum.toggleThreadLike('${thread.id}')">
@@ -762,7 +1035,8 @@ const Forum = {
         html += `
           <div class="reply-compose">
             <h4>Cevap Yaz</h4>
-            <textarea id="replyInput" placeholder="Cevabinizi yazin..."></textarea>
+            ${ForumEditor.buildToolbar('replyInput')}
+            <textarea id="replyInput" placeholder="Cevabinizi yazin... BBCode desteklenir: [b]kalin[/b] [i]italik[/i] [img]url[/img]"></textarea>
             <div class="reply-compose-footer">
               <button class="btn-primary" onclick="Forum.submitReply('${thread.id}')">Gonder</button>
             </div>
@@ -806,7 +1080,7 @@ const Forum = {
             <div class="role-badge ${roleBadgeClass}" style="font-size:9px;padding:1px 6px;">${roleBadgeText}</div>
           </div>
           <div class="reply-content-area">
-            <div class="reply-content-text">${esc(reply.content)}</div>
+            <div class="reply-content-text">${renderContent(reply.content)}</div>
             <div class="reply-footer">
               <span>${timeAgo(reply.created_at)}</span>
               <button class="${userLiked ? 'liked' : ''}" onclick="Forum.toggleReplyLike('${reply.id}')">
@@ -817,6 +1091,7 @@ const Forum = {
               ${canDelete ? `<button onclick="Forum.deleteReply('${reply.id}')">Sil</button>` : ""}
             </div>
             <div id="replyBox-${reply.id}" style="display:none;margin-top:10px;">
+              ${ForumEditor.buildToolbar('replyInput-' + reply.id)}
               <textarea id="replyInput-${reply.id}" placeholder="Cevabinizi yazin..." style="min-height:80px;"></textarea>
               <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;">
                 <button class="btn-secondary" onclick="document.getElementById('replyBox-${reply.id}').style.display='none';" style="padding:6px 12px;font-size:12px;">Iptal</button>
@@ -1050,6 +1325,10 @@ const Forum = {
     $("threadTitleInput").value = "";
     $("threadContentInput").value = "";
     $("threadTagsInput").value = "";
+
+    // Inject toolbar for thread content
+    const toolbarContainer = $("threadContentToolbar");
+    if (toolbarContainer) toolbarContainer.innerHTML = ForumEditor.buildToolbar("threadContentInput");
 
     ForumModals.open("newThreadModal");
   },
