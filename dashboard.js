@@ -214,6 +214,26 @@ const AuthService = {
   }
 };
 
+/* ── Card Click Handler ── */
+function handleCardClick(e) {
+  const card = e.currentTarget;
+  const url = card.dataset.url;
+  const lang = document.documentElement.lang === "en" ? "en" : "tr";
+
+  if (!AuthService.currentUser) {
+    Modals.open("loginModal");
+    toast(lang === "tr" ? "Önce giriş yapmalısınız." : "Please login first.");
+    return;
+  }
+
+  if (AuthService.currentUser.tokens < 1) {
+    Modals.open("buyTokensModal");
+    return;
+  }
+
+  window.location.href = url;
+}
+
 /* ── Modals ── */
 const Modals = {
   open(id) {
@@ -569,6 +589,12 @@ function wire() {
 
   // Theme
   $("themeToggle").addEventListener("click", toggleTheme);
+
+  // Tool Cards
+  document.querySelectorAll(".tool-card").forEach(card => {
+    card.addEventListener("click", handleCardClick);
+    card.style.cursor = "pointer";
+  });
 
   // Auth - Login
   $("loginBtn").addEventListener("click", () => Modals.open("loginModal"));
