@@ -220,6 +220,17 @@ function handleCardClick(e) {
   const url = card.dataset.url;
   const lang = document.documentElement.lang === "en" ? "en" : "tr";
 
+  // Forum: ucretsiz erisim, sadece login gerekli, token gerekmez
+  if (url && url.includes("forum.html")) {
+    if (!AuthService.currentUser) {
+      Modals.open("loginModal");
+      toast(lang === "tr" ? "Önce giriş yapmalısınız." : "Please login first.");
+      return;
+    }
+    window.location.href = url;
+    return;
+  }
+
   if (!AuthService.currentUser) {
     Modals.open("loginModal");
     toast(lang === "tr" ? "Önce giriş yapmalısınız." : "Please login first.");
