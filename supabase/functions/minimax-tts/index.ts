@@ -20,8 +20,8 @@ serve(async (req) => {
     
     if (!MINIMAX_API_KEY) throw new Error("MINIMAX_API_KEY is not set in environment variables");
 
-    // Call MiniMax T2A API
-    const response = await fetch("https://api.minimax.chat/v1/t2a_v2", {
+    // Call MiniMax T2A API (International Endpoint)
+    const response = await fetch("https://api.minimaxi.chat/v1/t2a_v2", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -45,12 +45,12 @@ serve(async (req) => {
       })
     })
 
-    if (!response.ok) {
-      const err = await response.text()
-      throw new Error(`MiniMax API Error: ${err}`)
-    }
-
     const data = await response.json()
+
+    // Handle Minimax specific errors
+    if (data.base_resp && data.base_resp.status_code !== 0) {
+      throw new Error(`MiniMax Hatası (${data.base_resp.status_code}): ${data.base_resp.status_msg}`);
+    }
     
     return new Response(
       JSON.stringify(data),
