@@ -93,13 +93,19 @@ function bindEvents() {
           <div style="margin-bottom:16px;">
             <label style="display:block; margin-bottom:8px; font-weight:600; font-size:14px;">Çözünürlük</label>
             <select id="exportResolution" style="width:100%; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--bg); color:var(--text);">
-              <option value="720p">720p (Hızlı)</option>
-              <option value="1080p" selected>1080p (Önerilen)</option>
-              <option value="4k">4K (En Yüksek Kalite)</option>
+              <option value="1280x720">720p (Hızlı)</option>
+              <option value="1920x1080" selected>1080p (Önerilen)</option>
+              <option value="3840x2160">4K (En Yüksek Kalite)</option>
             </select>
           </div>
+          <div id="exportProgress" style="display:none; margin-bottom:16px;">
+             <p style="font-size:13px; font-weight:600; color:var(--text);">İşleniyor: <span id="exportStatusText">Başlıyor...</span></p>
+             <div style="width:100%; height:6px; background:var(--border); border-radius:3px; margin-top:6px; overflow:hidden;">
+                <div id="exportProgressBar" style="width:0%; height:100%; background:var(--brand); transition:width 0.3s ease;"></div>
+             </div>
+          </div>
           <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
-            <button onclick="document.getElementById('exportModal').remove()" class="btn-secondary">İptal</button>
+            <button onclick="document.getElementById('exportModal').remove()" class="btn-secondary" id="cancelExportBtn">İptal</button>
             <button id="startExportBtn" class="btn-primary">Oluştur ve İndir</button>
           </div>
         </div>
@@ -107,10 +113,15 @@ function bindEvents() {
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
-    document.getElementById('startExportBtn').addEventListener('click', () => {
+    document.getElementById('startExportBtn').addEventListener('click', async () => {
       const res = document.getElementById('exportResolution').value;
-      document.getElementById('exportModal').remove();
-      alert(`Video oluşturma başlatıldı. Çözünürlük: ${res}. Gerçek video render işlemi sunucu entegrasyonu gerektirir (Örn: FFmpeg). Proje buluta kaydedildi.`);
+      
+      // Prevent multiple clicks
+      document.getElementById('startExportBtn').disabled = true;
+      document.getElementById('cancelExportBtn').disabled = true;
+      document.getElementById('exportProgress').style.display = 'block';
+      
+      await performVideoExport(res);
     });
   });
 
@@ -562,6 +573,109 @@ window.clearSceneMedia = (id) => {
   }
 };
 
+// -- FFmpeg.wasm Export System --
+async function performVideoExport(resolution) {
+  const { FFmpeg } = window.FFmpeg;
+  const { fetchFile } = window.FFmpegUtil;
+  const ffmpeg = new FFmpeg();
+
+  const statusEl = document.getElementById('exportStatusText');
+  const progressEl = document.getElementById('exportProgressBar');
+
+  // Check if we have media to export
+  const scenesWithMedia = projectState.scenes.filter(s => s.media);
+  if (scenesWithMedia.length === 0) {
+    alert("Dışa aktarılacak hiçbir medya (video) bulunamadı. Lütfen önce videoya sahne ekleyin.");
+    document.getElementById('exportModal').remove();
+    return;
+  }
+
+  ffmpeg.on('log', ({ message }) => {
+    console.log('[FFmpeg]', message);
+  });
+  
+  ffmpeg.on('progress', ({ progress }) => {
+    // progress goes from 0 to 1
+    const p = Math.round(progress * 100);
+    progressEl.style.width = `${p}%`;
+    statusEl.textContent = `%${p} tamamlandı...`;
+  });
+
+  try {
+    statusEl.textContent = "FFmpeg Çekirdeği Yükleniyor...";
+    await ffmpeg.load({
+      coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+      wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm"
+    });
+
+    // 1. Download and Write Files to FFmpeg FS
+    let concatFilter = '';
+    let inputs = [];
+    
+    for (let i = 0; i < scenesWithMedia.length; i++) {
+      const scene = scenesWithMedia[i];
+      statusEl.textContent = `Medya indiriliyor (${i + 1}/${scenesWithMedia.length})...`;
+      
+      // Fetch the video file (CORS can be tricky but Pexels/Pixabay direct URLs usually allow it)
+      const vidData = await fetchFile(scene.media.url);
+      const inputName = `input_${i}.mp4`;
+      await ffmpeg.writeFile(inputName, vidData);
+      
+      inputs.push(`-i`);
+      inputs.push(inputName);
+      
+      // Resize to selected resolution (1080p etc.), set DAR to 16:9, trim to scene.duration, and re-encode audio
+      // Format: [0:v]scale=1920:1080,setdar=16/9,trim=duration=5[v0];
+      concatFilter += `[${i}:v]scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2,setdar=16/9,trim=duration=${scene.duration}[v${i}];`;
+    }
+
+    // 2. Concat the streams
+    statusEl.textContent = "Sahneler Birleştiriliyor (Render ediliyor)... Bu biraz zaman alabilir.";
+    
+    let concatStreamInputs = '';
+    for (let i = 0; i < scenesWithMedia.length; i++) {
+      concatStreamInputs += `[v${i}]`;
+    }
+    concatFilter += `${concatStreamInputs}concat=n=${scenesWithMedia.length}:v=1:a=0[outv]`;
+
+    const args = [
+      ...inputs,
+      '-filter_complex', concatFilter,
+      '-map', '[outv]',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-pix_fmt', 'yuv420p',
+      '-t', projectState.totalDuration.toString(),
+      'output.mp4'
+    ];
+
+    console.log("Running FFmpeg with args:", args);
+    await ffmpeg.exec(args);
+
+    statusEl.textContent = "Video indiriliyor...";
+    
+    // 3. Read Output and Download
+    const data = await ffmpeg.readFile('output.mp4');
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectState.title.replace(/[^a-z0-9]/gi, '_')}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    document.getElementById('exportModal').remove();
+    alert("Video başarıyla oluşturuldu ve bilgisayarınıza indirildi!");
+
+  } catch (err) {
+    console.error("FFmpeg Export Error:", err);
+    alert("Video oluşturulurken bir hata oluştu: " + err.message + "\n(Tarayıcı CORS politikaları nedeniyle medya indirilememiş olabilir.)");
+    document.getElementById('exportModal').remove();
+  }
+}
+
 // -- Preview Player --
 function updatePreview() {
   const activeScene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
@@ -579,6 +693,8 @@ function updatePreview() {
     placeholder.style.display = 'none';
     if (player.src !== activeScene.media.url) {
       player.src = activeScene.media.url;
+      // Ensure the video plays immediately if we just assigned it
+      player.play().catch(e => console.log("Auto-play prevented by browser policy", e));
     }
   } else {
     player.style.display = 'none';

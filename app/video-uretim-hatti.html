@@ -152,7 +152,7 @@
       
       <div class="preview-player-wrapper">
         <div class="preview-player" id="videoPreviewPlayer">
-          <video id="mainVideoPlayer" playsinline preload="auto"></video>
+          <video id="mainVideoPlayer" playsinline preload="auto" muted loop></video>
           <div class="preview-placeholder" id="previewPlaceholder">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
           </div>
@@ -219,6 +219,10 @@
 
   <!-- Audio elements for TTS -->
   <div id="audioPool" style="display:none;"></div>
+
+  <!-- FFmpeg.wasm for Browser Video Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
