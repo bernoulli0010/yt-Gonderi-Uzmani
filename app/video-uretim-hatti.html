@@ -130,10 +130,10 @@
           <input type="text" class="search-input" id="mediaSearchInput" placeholder="Medya araçlarını arayın" />
         </div>
       </div>
-      <div class="media-tabs">
-        <button class="media-tab active">Hepsi</button>
-        <button class="media-tab">Görsel</button>
-        <button class="media-tab">Video</button>
+      <div class="media-tabs" id="mediaTabsContainer">
+        <button class="media-tab active" data-type="all">Hepsi</button>
+        <button class="media-tab" data-type="image">Görsel</button>
+        <button class="media-tab" data-type="video">Video</button>
       </div>
       <div class="media-grid" id="mediaGrid">
         <!-- Pexels results will populate here -->
@@ -153,6 +153,7 @@
       <div class="preview-player-wrapper">
         <div class="preview-player" id="videoPreviewPlayer">
           <video id="mainVideoPlayer" playsinline preload="auto" muted loop></video>
+          <img id="mainImagePreview" style="display:none; width:100%; height:100%; object-fit:contain;" />
           <div class="preview-placeholder" id="previewPlaceholder">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
           </div>

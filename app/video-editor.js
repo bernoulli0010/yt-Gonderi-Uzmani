@@ -118,10 +118,22 @@ function bindEvents() {
       
       // Prevent multiple clicks
       document.getElementById('startExportBtn').disabled = true;
-      document.getElementById('cancelExportBtn').disabled = true;
       document.getElementById('exportProgress').style.display = 'block';
       
       await performVideoExport(res);
+    });
+
+    document.getElementById('cancelExportBtn').addEventListener('click', () => {
+      if (window.activeFFmpeg) {
+        try {
+          window.activeFFmpeg.terminate();
+        } catch (e) {
+          console.error("FFmpeg terminate error:", e);
+        }
+        window.activeFFmpeg = null;
+      }
+      const modal = document.getElementById('exportModal');
+      if (modal) modal.remove();
     });
   });
 
@@ -197,6 +209,16 @@ function bindEvents() {
 
   // Trigger properties panel on load
   if (projectState.scenes.length > 0) renderPropertiesPanel();
+
+  // Media Tabs
+  document.querySelectorAll('.media-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      document.querySelectorAll('.media-tab').forEach(t => t.classList.remove('active'));
+      e.currentTarget.classList.add('active');
+      const searchInput = document.getElementById('mediaSearchInput');
+      searchAllMedia(searchInput.value || "nature", true);
+    });
+  });
 
   // Manual Media Search
   const searchInput = document.getElementById('mediaSearchInput');
@@ -444,7 +466,7 @@ async function autoSearchMediaForScene(scene) {
   console.log(`Auto-searching Pexels & Pixabay for scene ${scene.id} with query: "${query}"`);
   
   try {
-    const results = await fetchAllMedia(query, 3);
+    const results = await fetchAllMedia(query, 3, 'all');
     
     if (results && results.length > 0) {
       // Pick the first result from our combined pool
@@ -463,7 +485,9 @@ async function autoSearchMediaForScene(scene) {
 
 async function searchAllMedia(query, showInPanel = false) {
   try {
-    const combinedResults = await fetchAllMedia(query, 10);
+    const activeTab = document.querySelector('.media-tab.active');
+    const mediaType = activeTab ? activeTab.getAttribute('data-type') : 'all';
+    const combinedResults = await fetchAllMedia(query, 10, mediaType);
     
     if (showInPanel) {
       const grid = document.getElementById('mediaGrid');
@@ -496,68 +520,127 @@ async function searchAllMedia(query, showInPanel = false) {
   }
 }
 
-async function fetchAllMedia(query, limitPerSource = 5) {
+async function fetchAllMedia(query, limitPerSource = 5, mediaType = 'all') {
   let results = [];
-  
-  // 1. Fetch Pexels
-  const pexelsPromise = fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${limitPerSource}&orientation=landscape`, {
-    headers: { 'Authorization': PEXELS_API_KEY }
-  })
-  .then(res => res.json())
-  .then(data => {
-    if (data.videos) {
-      return data.videos.map(v => {
-        const hdFile = v.video_files.find(f => f.quality === 'hd') || v.video_files[0];
-        return {
-          type: 'video',
-          url: hdFile.link,
-          thumbnail: v.image,
-          duration: v.duration,
-          source: 'Pexels'
-        };
-      });
-    }
-    return [];
-  })
-  .catch(err => {
-    console.error("Pexels error:", err);
-    return [];
-  });
+  let promises = [];
 
-  // 2. Fetch Pixabay
-  const pixabayPromise = fetch(`https://pixabay.com/api/videos/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&per_page=${limitPerSource}&video_type=film`)
-  .then(res => res.json())
-  .then(data => {
-    if (data.hits) {
-      return data.hits.map(v => {
-        // Pixabay videos have multiple sizes, tiny, small, medium, large
-        const vidUrl = v.videos.medium ? v.videos.medium.url : v.videos.tiny.url;
-        // Use a snapshot as thumbnail if available, or fetch from picture_id
-        const thumb = `https://i.vimeocdn.com/video/${v.picture_id}_640x360.jpg`;
-        return {
-          type: 'video',
-          url: vidUrl,
-          thumbnail: thumb,
-          duration: v.duration,
-          source: 'Pixabay'
-        };
-      });
-    }
-    return [];
-  })
-  .catch(err => {
-    console.error("Pixabay error:", err);
-    return [];
-  });
+  const fetchVideos = mediaType === 'all' || mediaType === 'video';
+  const fetchImages = mediaType === 'all' || mediaType === 'image';
 
-  // Wait for both
-  const [pexelsResults, pixabayResults] = await Promise.all([pexelsPromise, pixabayPromise]);
+  // 1. Fetch Pexels Videos
+  if (fetchVideos) {
+    promises.push(fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${limitPerSource}&orientation=landscape`, {
+      headers: { 'Authorization': PEXELS_API_KEY }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.videos) {
+        return data.videos.map(v => {
+          const hdFile = v.video_files.find(f => f.quality === 'hd') || v.video_files[0];
+          return {
+            type: 'video',
+            url: hdFile.link,
+            thumbnail: v.image,
+            duration: v.duration,
+            source: 'Pexels'
+          };
+        });
+      }
+      return [];
+    })
+    .catch(err => {
+      console.error("Pexels error:", err);
+      return [];
+    }));
+  }
+
+  // 2. Fetch Pexels Images
+  if (fetchImages) {
+    promises.push(fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${limitPerSource}&orientation=landscape`, {
+      headers: { 'Authorization': PEXELS_API_KEY }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.photos) {
+        return data.photos.map(p => {
+          return {
+            type: 'image',
+            url: p.src.original,
+            thumbnail: p.src.medium,
+            duration: 5, // Default duration for image
+            source: 'Pexels Image'
+          };
+        });
+      }
+      return [];
+    })
+    .catch(err => {
+      console.error("Pexels Image error:", err);
+      return [];
+    }));
+  }
+
+  // 3. Fetch Pixabay Videos
+  if (fetchVideos) {
+    promises.push(fetch(`https://pixabay.com/api/videos/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&per_page=${limitPerSource}&video_type=film`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.hits) {
+        return data.hits.map(v => {
+          // Pixabay videos have multiple sizes, tiny, small, medium, large
+          const vidUrl = v.videos.medium ? v.videos.medium.url : v.videos.tiny.url;
+          // Use a snapshot as thumbnail if available, or fetch from picture_id
+          const thumb = `https://i.vimeocdn.com/video/${v.picture_id}_640x360.jpg`;
+          return {
+            type: 'video',
+            url: vidUrl,
+            thumbnail: thumb,
+            duration: v.duration,
+            source: 'Pixabay'
+          };
+        });
+      }
+      return [];
+    })
+    .catch(err => {
+      console.error("Pixabay error:", err);
+      return [];
+    }));
+  }
+
+  // 4. Fetch Pixabay Images
+  if (fetchImages) {
+    promises.push(fetch(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${limitPerSource}&orientation=horizontal`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.hits) {
+        return data.hits.map(p => {
+          return {
+            type: 'image',
+            url: p.largeImageURL,
+            thumbnail: p.webformatURL,
+            duration: 5,
+            source: 'Pixabay Image'
+          };
+        });
+      }
+      return [];
+    })
+    .catch(err => {
+      console.error("Pixabay Image error:", err);
+      return [];
+    }));
+  }
+
+  // Wait for all
+  const allResultsArrays = await Promise.all(promises);
   
-  // Interleave the results so we get a mix of both platforms
-  const maxLength = Math.max(pexelsResults.length, pixabayResults.length);
+  // Interleave the results so we get a mix of platforms and types
+  const maxLength = Math.max(...allResultsArrays.map(arr => arr.length));
   for (let i = 0; i < maxLength; i++) {
-    if (pixabayResults[i]) results.push(pixabayResults[i]);
-    if (pexelsResults[i]) results.push(pexelsResults[i]);
+    for (let j = 0; j < allResultsArrays.length; j++) {
+      if (allResultsArrays[j][i]) results.push(allResultsArrays[j][i]);
+    }
   }
   
   return results;
@@ -632,6 +715,7 @@ async function performVideoExport(resolution) {
   const { FFmpeg } = window.FFmpeg;
   const { fetchFile } = window.FFmpegUtil;
   const ffmpeg = new FFmpeg();
+  window.activeFFmpeg = ffmpeg;
 
   const statusEl = document.getElementById('exportStatusText');
   const progressEl = document.getElementById('exportProgressBar');
@@ -670,13 +754,18 @@ async function performVideoExport(resolution) {
       const scene = scenesWithMedia[i];
       statusEl.textContent = `Medya indiriliyor (${i + 1}/${scenesWithMedia.length})...`;
       
-      // Fetch the video file (CORS can be tricky but Pexels/Pixabay direct URLs usually allow it)
+      const isImage = scene.media.type === 'image';
+      const extension = isImage ? 'jpg' : 'mp4';
+      const inputName = `input_${i}.${extension}`;
+
       const vidData = await fetchFile(scene.media.url);
-      const inputName = `input_${i}.mp4`;
       await ffmpeg.writeFile(inputName, vidData);
       
-      inputs.push(`-i`);
-      inputs.push(inputName);
+      if (isImage) {
+        inputs.push('-loop', '1', '-framerate', '30', '-t', scene.duration.toString(), '-i', inputName);
+      } else {
+        inputs.push(`-i`, inputName);
+      }
       
       // Resize to selected resolution (1080p etc.), set DAR to 16:9, trim to scene.duration, and re-encode audio
       // Format: [0:v]scale=1920:1080,setdar=16/9,trim=duration=5[v0];
@@ -720,13 +809,17 @@ async function performVideoExport(resolution) {
     a.click();
     document.body.removeChild(a);
 
-    document.getElementById('exportModal').remove();
+    const modal = document.getElementById('exportModal');
+    if (modal) modal.remove();
+    window.activeFFmpeg = null;
     alert("Video başarıyla oluşturuldu ve bilgisayarınıza indirildi!");
 
   } catch (err) {
     console.error("FFmpeg Export Error:", err);
-    alert("Video oluşturulurken bir hata oluştu: " + err.message + "\n(Tarayıcı CORS politikaları nedeniyle medya indirilememiş olabilir.)");
-    document.getElementById('exportModal').remove();
+    alert("Video oluşturulurken bir hata oluştu veya işlem iptal edildi: " + err.message + "\n(Tarayıcı CORS politikaları nedeniyle medya indirilememiş olabilir.)");
+    const modal = document.getElementById('exportModal');
+    if (modal) modal.remove();
+    window.activeFFmpeg = null;
   }
 }
 
@@ -736,6 +829,7 @@ function updatePreview() {
   if (!activeScene) return;
 
   const player = document.getElementById('mainVideoPlayer');
+  const imgPreview = document.getElementById('mainImagePreview');
   const placeholder = document.getElementById('previewPlaceholder');
   const subtitle = document.getElementById('previewSubtitle');
   const badge = document.getElementById('currentSceneBadge');
@@ -743,15 +837,23 @@ function updatePreview() {
   badge.textContent = `Bölüm ${projectState.scenes.findIndex(s => s.id === activeScene.id) + 1}`;
 
   if (activeScene.media) {
-    player.style.display = 'block';
     placeholder.style.display = 'none';
-    if (player.src !== activeScene.media.url) {
-      player.src = activeScene.media.url;
-      // Ensure the video plays immediately if we just assigned it
-      player.play().catch(e => console.log("Auto-play prevented by browser policy", e));
+    if (activeScene.media.type === 'image') {
+      player.style.display = 'none';
+      imgPreview.style.display = 'block';
+      imgPreview.src = activeScene.media.url;
+    } else {
+      imgPreview.style.display = 'none';
+      player.style.display = 'block';
+      if (player.src !== activeScene.media.url) {
+        player.src = activeScene.media.url;
+        // Ensure the video plays immediately if we just assigned it
+        player.play().catch(e => console.log("Auto-play prevented by browser policy", e));
+      }
     }
   } else {
     player.style.display = 'none';
+    if (imgPreview) imgPreview.style.display = 'none';
     placeholder.style.display = 'flex';
     player.src = '';
   }
