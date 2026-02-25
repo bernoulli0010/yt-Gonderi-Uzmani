@@ -3,8 +3,9 @@
  * Core Logic & State Management
  */
 
-// Pexels API Key provided by user
+// API Keys provided by user
 const PEXELS_API_KEY = "xaKuGpofQUgZYx6JlPEZJdqhgUnsUu8ZpJmbT4tnhA0J2Rpb5vO3ibx0";
+const PIXABAY_API_KEY = "54799067-a3fed06a32d899bc1ede143be";
 
 // State Management
 let projectState = {
@@ -85,7 +86,7 @@ function bindEvents() {
         document.getElementById('medyaPanelContent').style.display = 'flex';
         // Trigger generic search if empty
         if (document.getElementById('mediaGrid').innerHTML.trim() === '') {
-          searchPexels("nature", true);
+          searchAllMedia("nature", true);
         }
       } else {
         // Fallback for others
@@ -120,7 +121,7 @@ function bindEvents() {
   if (searchInput) {
     searchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        searchPexels(e.target.value, true);
+        searchAllMedia(e.target.value, true);
       }
     });
   }
@@ -274,11 +275,8 @@ async function generateTTS(sceneId) {
   }
 }
 
-// -- Pexels API & Auto-Search --
+// -- API Search & Auto-Assign --
 async function autoSearchMediaForScene(scene) {
-  // Extract a keyword from the text. 
-  // For better results, we take the longest words or first few meaningful words.
-  // In a real production app, we'd use NLP or LLM to extract the main subject.
   const words = scene.text.replace(/[^\w\s\ğ\ü\ş\ı\ö\ç\Ğ\Ü\Ş\İ\Ö\Ç]/gi, '').split(/\s+/);
   const meaningfulWords = words.filter(w => w.length > 4);
   
@@ -286,24 +284,14 @@ async function autoSearchMediaForScene(scene) {
   if (!query) query = words.slice(0, 2).join(" ");
   if (!query) query = "nature"; // fallback
 
-  console.log(`Auto-searching Pexels for scene ${scene.id} with query: "${query}"`);
+  console.log(`Auto-searching Pexels & Pixabay for scene ${scene.id} with query: "${query}"`);
   
   try {
-    const res = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=3&orientation=landscape`, {
-      headers: { 'Authorization': PEXELS_API_KEY }
-    });
+    const results = await fetchAllMedia(query, 3);
     
-    const data = await res.json();
-    if (data.videos && data.videos.length > 0) {
-      const video = data.videos[0];
-      const hdFile = video.video_files.find(f => f.quality === 'hd') || video.video_files[0];
-      
-      scene.media = {
-        type: 'video',
-        url: hdFile.link,
-        thumbnail: video.image,
-        duration: video.duration
-      };
+    if (results && results.length > 0) {
+      // Pick the first result from our combined pool
+      scene.media = results[0];
       scene.autoSearched = true;
       console.log("Auto-assigned media:", scene.media);
       
@@ -312,39 +300,30 @@ async function autoSearchMediaForScene(scene) {
       updatePreview(); // Show in player if active
     }
   } catch (err) {
-    console.error("Pexels auto-search error:", err);
+    console.error("Auto-search error:", err);
   }
 }
 
-async function searchPexels(query, showInPanel = false) {
+async function searchAllMedia(query, showInPanel = false) {
   try {
-    const res = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=15`, {
-      headers: { 'Authorization': PEXELS_API_KEY }
-    });
-    const data = await res.json();
+    const combinedResults = await fetchAllMedia(query, 10);
     
     if (showInPanel) {
       const grid = document.getElementById('mediaGrid');
       grid.innerHTML = '';
       
-      data.videos.forEach(video => {
-        const hdFile = video.video_files.find(f => f.quality === 'hd') || video.video_files[0];
+      combinedResults.forEach(media => {
         const el = document.createElement('div');
         el.className = 'media-item';
         el.innerHTML = `
-          <img src="${video.image}" alt="Pexels Video">
-          <div class="media-item-duration">${video.duration}s</div>
+          <img src="${media.thumbnail}" alt="Stock Video">
+          <div class="media-item-duration">${media.duration}s <span style="font-size:8px; opacity:0.8;">(${media.source})</span></div>
         `;
         el.onclick = () => {
           // Assign to active scene
           const activeScene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
           if (activeScene) {
-            activeScene.media = {
-              type: 'video',
-              url: hdFile.link,
-              thumbnail: video.image,
-              duration: video.duration
-            };
+            activeScene.media = media;
             activeScene.autoSearched = true;
             renderScenes();
             renderTimeline();
@@ -354,10 +333,77 @@ async function searchPexels(query, showInPanel = false) {
         grid.appendChild(el);
       });
     }
-    return data.videos;
+    return combinedResults;
   } catch (e) {
-    console.error("Pexels Search Error:", e);
+    console.error("Combined Search Error:", e);
   }
+}
+
+async function fetchAllMedia(query, limitPerSource = 5) {
+  let results = [];
+  
+  // 1. Fetch Pexels
+  const pexelsPromise = fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${limitPerSource}&orientation=landscape`, {
+    headers: { 'Authorization': PEXELS_API_KEY }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.videos) {
+      return data.videos.map(v => {
+        const hdFile = v.video_files.find(f => f.quality === 'hd') || v.video_files[0];
+        return {
+          type: 'video',
+          url: hdFile.link,
+          thumbnail: v.image,
+          duration: v.duration,
+          source: 'Pexels'
+        };
+      });
+    }
+    return [];
+  })
+  .catch(err => {
+    console.error("Pexels error:", err);
+    return [];
+  });
+
+  // 2. Fetch Pixabay
+  const pixabayPromise = fetch(`https://pixabay.com/api/videos/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&per_page=${limitPerSource}&video_type=film`)
+  .then(res => res.json())
+  .then(data => {
+    if (data.hits) {
+      return data.hits.map(v => {
+        // Pixabay videos have multiple sizes, tiny, small, medium, large
+        const vidUrl = v.videos.medium ? v.videos.medium.url : v.videos.tiny.url;
+        // Use a snapshot as thumbnail if available, or fetch from picture_id
+        const thumb = `https://i.vimeocdn.com/video/${v.picture_id}_640x360.jpg`;
+        return {
+          type: 'video',
+          url: vidUrl,
+          thumbnail: thumb,
+          duration: v.duration,
+          source: 'Pixabay'
+        };
+      });
+    }
+    return [];
+  })
+  .catch(err => {
+    console.error("Pixabay error:", err);
+    return [];
+  });
+
+  // Wait for both
+  const [pexelsResults, pixabayResults] = await Promise.all([pexelsPromise, pixabayPromise]);
+  
+  // Interleave the results so we get a mix of both platforms
+  const maxLength = Math.max(pexelsResults.length, pixabayResults.length);
+  for (let i = 0; i < maxLength; i++) {
+    if (pixabayResults[i]) results.push(pixabayResults[i]);
+    if (pexelsResults[i]) results.push(pexelsResults[i]);
+  }
+  
+  return results;
 }
 
 // -- Preview Player --
