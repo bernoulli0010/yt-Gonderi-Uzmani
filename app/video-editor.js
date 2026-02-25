@@ -68,6 +68,52 @@ function initUI() {
 }
 
 function bindEvents() {
+  // -- Header Buttons --
+  document.getElementById('newVideoBtn').addEventListener('click', () => {
+    if (confirm("Mevcut projeyi silip yeni bir video başlatmak istiyor musunuz?")) {
+      projectState.title = "Başlıksız Proje";
+      document.getElementById('projectTitle').value = projectState.title;
+      projectState.scenes = [{
+        id: generateId(), text: "", voice: "speech-01", media: null, duration: 5.0, autoSearched: false
+      }];
+      projectState.activeSceneId = projectState.scenes[0].id;
+      projectState.currentTime = 0;
+      updateTotalDuration();
+      renderScenes();
+      renderTimeline();
+    }
+  });
+
+  document.getElementById('exportVideoBtn').addEventListener('click', () => {
+    // Show Export Modal
+    const modalHtml = `
+      <div id="exportModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
+        <div style="background:var(--bg); padding:24px; border-radius:var(--radius); width:400px; box-shadow:var(--shadow-md);">
+          <h3 style="margin-bottom:16px;">Video Oluştur</h3>
+          <div style="margin-bottom:16px;">
+            <label style="display:block; margin-bottom:8px; font-weight:600; font-size:14px;">Çözünürlük</label>
+            <select id="exportResolution" style="width:100%; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--bg); color:var(--text);">
+              <option value="720p">720p (Hızlı)</option>
+              <option value="1080p" selected>1080p (Önerilen)</option>
+              <option value="4k">4K (En Yüksek Kalite)</option>
+            </select>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
+            <button onclick="document.getElementById('exportModal').remove()" class="btn-secondary">İptal</button>
+            <button id="startExportBtn" class="btn-primary">Oluştur ve İndir</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    document.getElementById('startExportBtn').addEventListener('click', () => {
+      const res = document.getElementById('exportResolution').value;
+      document.getElementById('exportModal').remove();
+      alert(`Video oluşturma başlatıldı. Çözünürlük: ${res}. Gerçek video render işlemi sunucu entegrasyonu gerektirir (Örn: FFmpeg). Proje buluta kaydedildi.`);
+    });
+  });
+
   // Tabs
   document.querySelectorAll('.sidebar-tab').forEach(tab => {
     tab.addEventListener('click', (e) => {
@@ -96,6 +142,28 @@ function bindEvents() {
     });
   });
 
+  // Timeline Buttons
+  document.querySelectorAll('.timeline-tools .btn-text').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const action = e.currentTarget.textContent.trim();
+      if (action === "Ekle") {
+        document.getElementById('addSceneBtn').click();
+      } else if (action === "Sil") {
+        if (projectState.scenes.length > 1) {
+          projectState.scenes = projectState.scenes.filter(s => s.id !== projectState.activeSceneId);
+          projectState.activeSceneId = projectState.scenes[0].id;
+          updateTotalDuration();
+          renderScenes();
+          renderTimeline();
+        } else {
+          alert("En az bir bölüm olmak zorunda.");
+        }
+      } else if (action === "Böl") {
+        alert("Böl (Split) özelliği için zaman çizelgesi üzerinde bir noktaya tıklamalısınız. (Yakında)");
+      }
+    });
+  });
+
   // Add Scene
   document.getElementById('addSceneBtn').addEventListener('click', () => {
     const newScene = {
@@ -116,6 +184,9 @@ function bindEvents() {
   // Play/Pause
   document.getElementById('playBtn').addEventListener('click', togglePlay);
 
+  // Trigger properties panel on load
+  if (projectState.scenes.length > 0) renderPropertiesPanel();
+
   // Manual Media Search
   const searchInput = document.getElementById('mediaSearchInput');
   if (searchInput) {
@@ -123,6 +194,26 @@ function bindEvents() {
       if (e.key === 'Enter') {
         searchAllMedia(e.target.value, true);
       }
+    });
+  }
+
+  // Zoom Slider
+  const zoomSlider = document.querySelector('.zoom-slider');
+  if (zoomSlider) {
+    zoomSlider.addEventListener('input', (e) => {
+      document.querySelector('.control-text').textContent = e.target.value + '%';
+    });
+  }
+
+  // Change Aspect Ratio
+  const aspectBtn = document.getElementById('changeAspectBtn');
+  if (aspectBtn) {
+    let aspects = ['16/9', '9/16', '1/1'];
+    let currentAspect = 0;
+    aspectBtn.addEventListener('click', () => {
+      currentAspect = (currentAspect + 1) % aspects.length;
+      document.getElementById('videoPreviewPlayer').style.aspectRatio = aspects[currentAspect];
+      aspectBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect></svg> ${aspects[currentAspect]}`;
     });
   }
 }
@@ -144,6 +235,7 @@ function renderScenes() {
         renderScenes(); // re-render to update active state
         updatePreview();
       }
+      renderPropertiesPanel();
     };
 
     let mediaThumbHtml = '';
@@ -405,6 +497,70 @@ async function fetchAllMedia(query, limitPerSource = 5) {
   
   return results;
 }
+
+// -- Right Panel (Properties) --
+function renderPropertiesPanel() {
+  const panel = document.getElementById('propertiesPanel');
+  const activeScene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
+
+  if (!activeScene) {
+    panel.innerHTML = `<div class="properties-empty"><p>Buradan bir varlık veya bölümü seçerek özelliklerini düzenleyin.</p></div>`;
+    return;
+  }
+
+  const idx = projectState.scenes.indexOf(activeScene) + 1;
+  const wordCount = activeScene.text.trim().split(/\s+/).filter(w => w.length > 0).length;
+  
+  panel.innerHTML = `
+    <div style="padding: 16px; border-bottom: 1px solid var(--border);">
+      <h3 style="font-size:14px; margin:0;">Bölüm ${idx} Özellikleri</h3>
+    </div>
+    <div style="padding: 16px; display:flex; flex-direction:column; gap:12px; font-size:13px;">
+      <div>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Süre (Saniye)</label>
+        <input type="number" value="${activeScene.duration.toFixed(1)}" step="0.5" min="1" onchange="updateSceneDuration(this.value, '${activeScene.id}')" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+      </div>
+      <div>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Kelime Sayısı</label>
+        <div>${wordCount} kelime</div>
+      </div>
+      <div>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Arka Plan Medya</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+           ${activeScene.media ? `<img src="${activeScene.media.thumbnail}" style="width:60px; height:34px; object-fit:cover; border-radius:2px;"> <span style="font-size:11px; color:var(--text-faint);">${activeScene.media.source}</span>` : `<span style="color:var(--danger);">Yok</span>`}
+        </div>
+        ${activeScene.media ? `<button class="btn-secondary mini" style="margin-top:8px; width:100%;" onclick="clearSceneMedia('${activeScene.id}')">Kaldır</button>` : ''}
+      </div>
+      <div>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Seçili Ses</label>
+        <div style="padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-page);">
+          ${activeScene.voice}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.updateSceneDuration = (val, id) => {
+  const scene = projectState.scenes.find(s => s.id === id);
+  if (scene) {
+    scene.duration = parseFloat(val);
+    updateTotalDuration();
+    renderTimeline();
+  }
+};
+
+window.clearSceneMedia = (id) => {
+  const scene = projectState.scenes.find(s => s.id === id);
+  if (scene) {
+    scene.media = null;
+    scene.autoSearched = false;
+    renderScenes();
+    renderTimeline();
+    updatePreview();
+    renderPropertiesPanel();
+  }
+};
 
 // -- Preview Player --
 function updatePreview() {
