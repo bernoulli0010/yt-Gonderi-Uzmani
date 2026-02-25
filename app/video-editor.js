@@ -261,15 +261,19 @@ function renderScenes() {
           <div class="scene-voice" onclick="openVoiceSelector('${scene.id}')">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
             <span id="voice-label-${scene.id}">${scene.voice}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </div>
-          <button class="btn-icon mini" onclick="generateTTS('${scene.id}')" title="Sesi Oluştur" style="width:24px;height:24px;padding:0;">
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </button>
         </div>
         ${mediaThumbHtml}
       </div>
       <div class="scene-body">
         <textarea class="scene-textarea" placeholder="Bu bölüm için senaryonuzu yazın..." data-id="${scene.id}">${scene.text}</textarea>
+        <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+           <button class="btn-secondary mini" onclick="generateTTS('${scene.id}')" title="Sesi Oluştur" style="font-size: 11px; padding: 4px 8px; border-radius: 4px;">
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+             Seslendir
+           </button>
+        </div>
         <audio id="audio-${scene.id}" style="display:none;"></audio>
       </div>
     `;
@@ -307,21 +311,71 @@ const handleTextChange = debounce((e) => {
 
 // -- Voice & TTS Management --
 const MINIMAX_VOICES = [
-  { id: "speech-01", label: "Speech 01 (Female)", gender: "Female" },
-  { id: "speech-02", label: "Speech 02 (Male)", gender: "Male" },
-  { id: "speech-03", label: "Speech 03 (Female)", gender: "Female" },
-  { id: "speech-04", label: "Speech 04 (Male)", gender: "Male" }
+  { id: "male-qn-qingse", label: "Qingse (Male)", gender: "Male" },
+  { id: "female-shaonv", label: "Shaonv (Female)", gender: "Female" },
+  { id: "speech-01", label: "Speech-01", gender: "Unknown" },
+  { id: "speech-02", label: "Speech-02", gender: "Unknown" }
 ];
 
 function openVoiceSelector(sceneId) {
-  const scene = projectState.scenes.find(s => s.id === sceneId);
-  const voice = prompt("Bir ses ID'si girin (örn: speech-01, speech-02, speech-03, speech-04):\nMevcut ses: " + scene.voice, scene.voice);
-  
-  if (voice && voice.trim() !== "") {
-    scene.voice = voice.trim();
-    document.getElementById(`voice-label-${scene.id}`).textContent = scene.voice;
+  // Check if voice selector modal exists, if not create it
+  let modal = document.getElementById('voiceSelectorModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'voiceSelectorModal';
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100%';
+    modal.style.height = '100%';
+    modal.style.background = 'rgba(0,0,0,0.5)';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.zIndex = '9999';
+    
+    let optionsHtml = '';
+    MINIMAX_VOICES.forEach(voice => {
+      optionsHtml += `
+        <div class="voice-option" onclick="selectVoice('${voice.id}')" style="padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 600; color: var(--text);">${voice.label}</span>
+          <span style="font-size: 11px; padding: 2px 6px; background: var(--bg-page); border-radius: 4px; color: var(--text-muted);">${voice.gender}</span>
+        </div>
+      `;
+    });
+
+    modal.innerHTML = `
+      <div style="background: var(--bg); width: 400px; border-radius: var(--radius); box-shadow: var(--shadow-md); overflow: hidden;">
+        <div style="padding: 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="margin: 0; font-size: 16px;">Ses Seçimi</h3>
+          <button onclick="document.getElementById('voiceSelectorModal').style.display='none'" class="btn-icon mini"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+          ${optionsHtml}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
   }
+  
+  // Store the target scene ID globally so we know which one to update
+  window.currentVoiceSceneId = sceneId;
+  modal.style.display = 'flex';
 }
+
+window.selectVoice = function(voiceId) {
+  const scene = projectState.scenes.find(s => s.id === window.currentVoiceSceneId);
+  if (scene) {
+    scene.voice = voiceId;
+    // Update the label in the UI
+    const label = document.getElementById(`voice-label-${scene.id}`);
+    if (label) label.textContent = voiceId;
+    
+    // Update right panel if it's open
+    renderPropertiesPanel();
+  }
+  document.getElementById('voiceSelectorModal').style.display = 'none';
+};
 
 async function generateTTS(sceneId) {
   const scene = projectState.scenes.find(s => s.id === sceneId);
@@ -523,28 +577,28 @@ function renderPropertiesPanel() {
   const wordCount = activeScene.text.trim().split(/\s+/).filter(w => w.length > 0).length;
   
   panel.innerHTML = `
-    <div style="padding: 16px; border-bottom: 1px solid var(--border);">
-      <h3 style="font-size:14px; margin:0;">Bölüm ${idx} Özellikleri</h3>
+    <div style="padding: 16px 20px; border-bottom: 1px solid var(--border);">
+      <h3 style="font-size:15px; margin:0; font-weight:700;">Bölüm ${idx} Özellikleri</h3>
     </div>
-    <div style="padding: 16px; display:flex; flex-direction:column; gap:12px; font-size:13px;">
+    <div style="padding: 20px; display:flex; flex-direction:column; gap:20px; font-size:13px;">
       <div>
-        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Süre (Saniye)</label>
-        <input type="number" value="${activeScene.duration.toFixed(1)}" step="0.5" min="1" onchange="updateSceneDuration(this.value, '${activeScene.id}')" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:8px;">Süre (Saniye)</label>
+        <input type="number" value="${activeScene.duration.toFixed(1).replace('.', ',')}" step="0.5" min="1" onchange="updateSceneDuration(this.value.replace(',', '.'), '${activeScene.id}')" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-page); color:var(--text); font-weight:500;">
       </div>
       <div>
-        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Kelime Sayısı</label>
-        <div>${wordCount} kelime</div>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:8px;">Kelime Sayısı</label>
+        <div style="color:var(--text); font-weight:500;">${wordCount} kelime</div>
       </div>
       <div>
-        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Arka Plan Medya</label>
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:8px;">Arka Plan Medya</label>
         <div style="display:flex; align-items:center; gap:8px;">
-           ${activeScene.media ? `<img src="${activeScene.media.thumbnail}" style="width:60px; height:34px; object-fit:cover; border-radius:2px;"> <span style="font-size:11px; color:var(--text-faint);">${activeScene.media.source}</span>` : `<span style="color:var(--danger);">Yok</span>`}
+           ${activeScene.media ? `<img src="${activeScene.media.thumbnail}" style="width:60px; height:34px; object-fit:cover; border-radius:4px;"> <span style="font-size:11px; color:var(--text-muted);">${activeScene.media.source}</span>` : `<span style="color:#ef5350; font-weight:500;">Yok</span>`}
         </div>
         ${activeScene.media ? `<button class="btn-secondary mini" style="margin-top:8px; width:100%;" onclick="clearSceneMedia('${activeScene.id}')">Kaldır</button>` : ''}
       </div>
       <div>
-        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">Seçili Ses</label>
-        <div style="padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-page);">
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:8px;">Seçili Ses</label>
+        <div style="padding:10px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg-page); color:var(--text); font-weight:500; cursor:pointer;" onclick="openVoiceSelector('${activeScene.id}')">
           ${activeScene.voice}
         </div>
       </div>
