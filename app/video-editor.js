@@ -31,6 +31,14 @@ const SUPABASE_URL = "https://bjcsbuvjumaigvsjphor.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ws-ubr-U3Uryo-oJxE0rvg_QTlz2Kqa";
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+// Drag & Drop State for Overlays
+let activeDragOverlay = null;
+let activeDragEl = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragInitialX = 0;
+let dragInitialY = 0;
+
 // Initialize
 document.addEventListener("DOMContentLoaded", () => {
   projectState.activeSceneId = projectState.scenes[0].id;
@@ -69,6 +77,30 @@ function initUI() {
 }
 
 function bindEvents() {
+  // Overlay Dragging Logic
+  document.addEventListener('mousemove', (e) => {
+    if (!activeDragOverlay || !activeDragEl) return;
+    const container = document.getElementById('overlaysContainer');
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    
+    const dx = ((e.clientX - dragStartX) / rect.width) * 100;
+    const dy = ((e.clientY - dragStartY) / rect.height) * 100;
+    
+    activeDragOverlay.x = Math.max(0, Math.min(100, dragInitialX + dx));
+    activeDragOverlay.y = Math.max(0, Math.min(100, dragInitialY + dy));
+    
+    activeDragEl.style.left = activeDragOverlay.x + '%';
+    activeDragEl.style.top = activeDragOverlay.y + '%';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (activeDragOverlay) {
+      activeDragOverlay = null;
+      activeDragEl = null;
+    }
+  });
+
   // -- Header Buttons --
   document.getElementById('newVideoBtn').addEventListener('click', () => {
     if (confirm("Mevcut projeyi silip yeni bir video başlatmak istiyor musunuz?")) {
@@ -742,7 +774,7 @@ function renderPropertiesPanel() {
               <span style="font-weight:600; font-size:12px;">Katman ${i+1}</span>
               <button class="btn-icon mini" onclick="removeOverlay('${ov.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef5350" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
             </div>
-            <input type="text" value="${ov.text.replace(/"/g, '&quot;')}" oninput="updateOverlayText('${ov.id}', this.value)" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;" />
+            <input type="text" id="overlay-input-${ov.id}" value="${ov.text.replace(/"/g, '&quot;')}" oninput="updateOverlayText('${ov.id}', this.value)" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;" />
           </div>
         `).join('')}
       </div>` : ''}
@@ -982,7 +1014,51 @@ function updatePreview() {
         el.style.fontFamily = 'var(--sans, sans-serif)';
         el.style.textShadow = '1px 1px 4px rgba(0,0,0,0.8)';
         el.style.textAlign = 'center';
-        el.style.width = '90%';
+        el.style.width = 'max-content';
+        el.style.maxWidth = '90%';
+        el.style.pointerEvents = 'auto';
+        el.style.cursor = 'move';
+        el.contentEditable = "true";
+        el.style.outline = "none";
+        el.style.padding = "4px 8px";
+        el.style.borderRadius = "4px";
+        el.style.border = "1px solid transparent";
+
+        el.addEventListener('mousedown', (e) => {
+          if (document.activeElement === el) return; // Don't drag if editing
+          activeDragOverlay = overlay;
+          activeDragEl = el;
+          dragStartX = e.clientX;
+          dragStartY = e.clientY;
+          dragInitialX = overlay.x;
+          dragInitialY = overlay.y;
+        });
+
+        el.addEventListener('focus', () => {
+          el.style.border = "1px dashed rgba(255,255,255,0.7)";
+          el.style.cursor = "text";
+        });
+
+        el.addEventListener('blur', () => {
+          el.style.border = "1px solid transparent";
+          el.style.cursor = "move";
+          // Safely extract text without newlines that could break FFmpeg
+          overlay.text = el.innerText.replace(/\n/g, ' ') || "Metin";
+          el.textContent = overlay.text;
+          renderPropertiesPanel();
+        });
+
+        el.addEventListener('input', () => {
+          overlay.text = el.innerText.replace(/\n/g, ' ');
+          const panelInput = document.getElementById(`overlay-input-${overlay.id}`);
+          if (panelInput) panelInput.value = overlay.text;
+        });
+
+        // Prevent dragging from firing if clicking inside while focused
+        el.addEventListener('click', (e) => {
+           if (document.activeElement === el) e.stopPropagation();
+        });
+
         overlaysContainer.appendChild(el);
       });
     }
