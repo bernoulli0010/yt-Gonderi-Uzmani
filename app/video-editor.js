@@ -16,6 +16,7 @@ let projectState = {
       text: "Dose control matters. Limit consumption to one ounce daily...",
       voice: "speech-01", // Minimax voice ID
       media: null, // { type: 'video', url: '...', thumbnail: '...', duration: 5 }
+      overlays: [], // Text overlays { id, type, text, fontSize, color, x, y, fontWeight }
       duration: 5.0, // estimated duration in seconds
       autoSearched: false
     }
@@ -74,7 +75,7 @@ function bindEvents() {
       projectState.title = "Başlıksız Proje";
       document.getElementById('projectTitle').value = projectState.title;
       projectState.scenes = [{
-        id: generateId(), text: "", voice: "speech-01", media: null, duration: 5.0, autoSearched: false
+        id: generateId(), text: "", voice: "speech-01", media: null, overlays: [], duration: 5.0, autoSearched: false
       }];
       projectState.activeSceneId = projectState.scenes[0].id;
       projectState.currentTime = 0;
@@ -148,15 +149,20 @@ function bindEvents() {
       // Hide all panels
       document.getElementById('activePanelContent').style.display = 'none';
       document.getElementById('medyaPanelContent').style.display = 'none';
+      const metinPanel = document.getElementById('metinPanelContent');
+      if(metinPanel) metinPanel.style.display = 'none';
       
       if (panel === 'senaryo') {
         document.getElementById('activePanelContent').style.display = 'flex';
+        document.querySelector('#activePanelContent .panel-title').textContent = 'Senaryo';
       } else if (panel === 'medya') {
         document.getElementById('medyaPanelContent').style.display = 'flex';
         // Trigger generic search if empty
         if (document.getElementById('mediaGrid').innerHTML.trim() === '') {
           searchAllMedia("nature", true);
         }
+      } else if (panel === 'metin') {
+        if(metinPanel) metinPanel.style.display = 'flex';
       } else {
         // Fallback for others
         document.getElementById('activePanelContent').style.display = 'flex';
@@ -194,6 +200,7 @@ function bindEvents() {
       text: "",
       voice: "speech-01",
       media: null,
+      overlays: [],
       duration: 3.0,
       autoSearched: false
     };
@@ -249,6 +256,47 @@ function bindEvents() {
       aspectBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect></svg> ${aspects[currentAspect]}`;
     });
   }
+
+  // Text Presets (Add Overlay)
+  document.querySelectorAll('.text-preset-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const type = e.currentTarget.getAttribute('data-type');
+      const activeScene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
+      if (!activeScene) return;
+      
+      if (!activeScene.overlays) activeScene.overlays = [];
+      
+      let newOverlay = {
+        id: generateId(),
+        type: type,
+        text: '',
+        x: 50,
+        y: 50,
+        fontSize: 32,
+        fontWeight: 'bold',
+        color: '#ffffff'
+      };
+      
+      if (type === 'title') {
+         newOverlay.text = 'Başlık metni';
+         newOverlay.fontSize = 48;
+         newOverlay.fontWeight = '800';
+      } else if (type === 'subtitle') {
+         newOverlay.text = 'Altyazı metni';
+         newOverlay.fontSize = 32;
+         newOverlay.fontWeight = '600';
+         newOverlay.y = 80;
+      } else {
+         newOverlay.text = 'Metin';
+         newOverlay.fontSize = 24;
+         newOverlay.fontWeight = '400';
+      }
+      
+      activeScene.overlays.push(newOverlay);
+      updatePreview();
+      renderPropertiesPanel();
+    });
+  });
 }
 
 // -- Scene Management --
@@ -685,9 +733,42 @@ function renderPropertiesPanel() {
           ${activeScene.voice}
         </div>
       </div>
+      ${activeScene.overlays && activeScene.overlays.length > 0 ? `
+      <div style="border-top: 1px solid var(--border); padding-top: 20px;">
+        <label style="color:var(--text-muted); font-weight:600; display:block; margin-bottom:8px;">Metin Katmanları</label>
+        ${activeScene.overlays.map((ov, i) => `
+          <div style="margin-bottom: 12px; padding: 12px; background: var(--bg-page); border: 1px solid var(--border); border-radius: 6px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
+              <span style="font-weight:600; font-size:12px;">Katman ${i+1}</span>
+              <button class="btn-icon mini" onclick="removeOverlay('${ov.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef5350" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+            </div>
+            <input type="text" value="${ov.text.replace(/"/g, '&quot;')}" oninput="updateOverlayText('${ov.id}', this.value)" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;" />
+          </div>
+        `).join('')}
+      </div>` : ''}
     </div>
   `;
 }
+
+window.removeOverlay = (id) => {
+  const scene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
+  if (scene && scene.overlays) {
+    scene.overlays = scene.overlays.filter(o => o.id !== id);
+    updatePreview();
+    renderPropertiesPanel();
+  }
+};
+
+window.updateOverlayText = (id, newText) => {
+  const scene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
+  if (scene && scene.overlays) {
+    const overlay = scene.overlays.find(o => o.id === id);
+    if (overlay) {
+      overlay.text = newText;
+      updatePreview();
+    }
+  }
+};
 
 window.updateSceneDuration = (val, id) => {
   const scene = projectState.scenes.find(s => s.id === id);
@@ -746,6 +827,17 @@ async function performVideoExport(resolution) {
       wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm"
     });
 
+    statusEl.textContent = "Font yükleniyor...";
+    let hasFont = false;
+    try {
+      // Roboto font
+      const fontData = await fetchFile('https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf');
+      await ffmpeg.writeFile('font.ttf', fontData);
+      hasFont = true;
+    } catch(e) {
+      console.warn("Font fetch failed, text overlays might not be exported.", e);
+    }
+
     // 1. Download and Write Files to FFmpeg FS
     let concatFilter = '';
     let inputs = [];
@@ -767,9 +859,18 @@ async function performVideoExport(resolution) {
         inputs.push(`-i`, inputName);
       }
       
-      // Resize to selected resolution (1080p etc.), set DAR to 16:9, trim to scene.duration, and re-encode audio
-      // Format: [0:v]scale=1920:1080,setdar=16/9,trim=duration=5[v0];
-      concatFilter += `[${i}:v]scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2,setdar=16/9,trim=duration=${scene.duration}[v${i}];`;
+      let textFilters = '';
+      if (hasFont && scene.overlays && scene.overlays.length > 0) {
+        scene.overlays.forEach(ov => {
+          // Escape single quotes and colons for FFmpeg
+          let safeText = ov.text.replace(/'/g, "\\'").replace(/:/g, "\\:");
+          // Convert percentage to FFmpeg coordinates (w-text_w) * 0.5
+          textFilters += `,drawtext=fontfile=font.ttf:text='${safeText}':fontcolor=white:fontsize=${ov.fontSize}:x=(w-text_w)*(${ov.x}/100):y=(h-text_h)*(${ov.y}/100)`;
+        });
+      }
+
+      // Resize to selected resolution (1080p etc.), set DAR to 16:9, trim to scene.duration, add text overlays
+      concatFilter += `[${i}:v]scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2,setdar=16/9${textFilters},trim=duration=${scene.duration}[v${i}];`;
     }
 
     // 2. Concat the streams
@@ -862,6 +963,29 @@ function updatePreview() {
     subtitle.innerHTML = `<div class="subtitle-text">${activeScene.text}</div>`;
   } else {
     subtitle.innerHTML = '';
+  }
+
+  const overlaysContainer = document.getElementById('overlaysContainer');
+  if (overlaysContainer) {
+    overlaysContainer.innerHTML = '';
+    if (activeScene.overlays && activeScene.overlays.length > 0) {
+      activeScene.overlays.forEach(overlay => {
+        const el = document.createElement('div');
+        el.textContent = overlay.text;
+        el.style.position = 'absolute';
+        el.style.left = overlay.x + '%';
+        el.style.top = overlay.y + '%';
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.color = overlay.color || '#ffffff';
+        el.style.fontSize = overlay.fontSize + 'px';
+        el.style.fontWeight = overlay.fontWeight || 'normal';
+        el.style.fontFamily = 'var(--sans, sans-serif)';
+        el.style.textShadow = '1px 1px 4px rgba(0,0,0,0.8)';
+        el.style.textAlign = 'center';
+        el.style.width = '90%';
+        overlaysContainer.appendChild(el);
+      });
+    }
   }
 }
 

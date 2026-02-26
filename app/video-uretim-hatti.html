@@ -140,6 +140,22 @@
       </div>
     </section>
 
+    <!-- Metin Panel (Hidden by default) -->
+    <section class="editor-panel" id="metinPanelContent" style="display:none;">
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto;">
+        <div class="text-preset-btn" data-type="title">
+          <span style="font-size: 32px; font-weight: 800; color: #111;">Başlık metni</span>
+        </div>
+        <div class="text-preset-btn" data-type="subtitle">
+          <span style="font-size: 20px; font-weight: 600; color: #111;">Altyazı metni</span>
+        </div>
+        <div class="text-preset-btn" data-type="body">
+          <span style="font-size: 15px; font-weight: 400; color: #111;">Metin</span>
+        </div>
+        <p style="margin-top: 16px; font-size: 13px; color: var(--text-muted);">Daha fazla metin şablonu çok yakında geliyor...</p>
+      </div>
+    </section>
+
     <!-- Center Preview Area -->
     <section class="editor-preview-container">
       <div class="preview-toolbar">
@@ -159,6 +175,8 @@
           </div>
           <!-- Subtitle Overlay -->
           <div class="subtitle-overlay" id="previewSubtitle"></div>
+          <!-- User Text Overlays -->
+          <div id="overlaysContainer" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none; z-index: 10;"></div>
         </div>
       </div>
       

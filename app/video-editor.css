@@ -615,3 +615,17 @@
   font-size: 10px;
   z-index: 2;
 }
+
+/* ── Text Panel Styles ── */
+.text-preset-btn {
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+}
+.text-preset-btn:hover {
+  background: #e2e8f0;
+}
