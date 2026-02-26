@@ -306,7 +306,9 @@ function bindEvents() {
         y: 50,
         fontSize: 32,
         fontWeight: 'bold',
-        color: '#ffffff'
+        color: '#ffffff',
+        bgColor: 'transparent',
+        fontFamily: 'Arial'
       };
       
       if (type === 'title') {
@@ -774,7 +776,38 @@ function renderPropertiesPanel() {
               <span style="font-weight:600; font-size:12px;">Katman ${i+1}</span>
               <button class="btn-icon mini" onclick="removeOverlay('${ov.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef5350" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
             </div>
-            <input type="text" id="overlay-input-${ov.id}" value="${ov.text.replace(/"/g, '&quot;')}" oninput="updateOverlayText('${ov.id}', this.value)" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;" />
+            <input type="text" id="overlay-input-${ov.id}" value="${ov.text.replace(/"/g, '&quot;')}" oninput="updateOverlayText('${ov.id}', this.value)" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px; margin-bottom: 8px;" />
+            
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+               <div style="flex: 1;">
+                 <label style="font-size: 11px; color: var(--text-muted); display:block; margin-bottom:4px;">Yazı Rengi</label>
+                 <input type="color" value="${ov.color || '#ffffff'}" onchange="updateOverlayProp('${ov.id}', 'color', this.value)" style="width:100%; height:28px; border:none; border-radius:4px; cursor:pointer;" />
+               </div>
+               <div style="flex: 1;">
+                 <label style="font-size: 11px; color: var(--text-muted); display:block; margin-bottom:4px;">Arka Plan</label>
+                 <select onchange="updateOverlayProp('${ov.id}', 'bgColor', this.value)" style="width:100%; height:28px; padding:0 4px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:12px;">
+                   <option value="transparent" ${ov.bgColor === 'transparent' ? 'selected' : ''}>Yok</option>
+                   <option value="rgba(0,0,0,0.7)" ${ov.bgColor === 'rgba(0,0,0,0.7)' ? 'selected' : ''}>Siyah Yarı-Saydam</option>
+                   <option value="rgba(255,255,255,0.7)" ${ov.bgColor === 'rgba(255,255,255,0.7)' ? 'selected' : ''}>Beyaz Yarı-Saydam</option>
+                   <option value="#000000" ${ov.bgColor === '#000000' ? 'selected' : ''}>Siyah</option>
+                   <option value="#ffffff" ${ov.bgColor === '#ffffff' ? 'selected' : ''}>Beyaz</option>
+                   <option value="#ef5350" ${ov.bgColor === '#ef5350' ? 'selected' : ''}>Kırmızı</option>
+                   <option value="#3b82f6" ${ov.bgColor === '#3b82f6' ? 'selected' : ''}>Mavi</option>
+                 </select>
+               </div>
+            </div>
+            
+            <div style="display: flex; gap: 8px;">
+               <div style="flex: 1;">
+                 <label style="font-size: 11px; color: var(--text-muted); display:block; margin-bottom:4px;">Yazı Tipi (Font)</label>
+                 <select onchange="updateOverlayProp('${ov.id}', 'fontFamily', this.value)" style="width:100%; height:28px; padding:0 4px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:12px;">
+                   <option value="Arial" ${ov.fontFamily === 'Arial' ? 'selected' : ''}>Arial</option>
+                   <option value="Georgia" ${ov.fontFamily === 'Georgia' ? 'selected' : ''}>Georgia</option>
+                   <option value="Courier New" ${ov.fontFamily === 'Courier New' ? 'selected' : ''}>Courier New</option>
+                   <option value="Impact" ${ov.fontFamily === 'Impact' ? 'selected' : ''}>Impact</option>
+                 </select>
+               </div>
+            </div>
           </div>
         `).join('')}
       </div>` : ''}
@@ -797,6 +830,17 @@ window.updateOverlayText = (id, newText) => {
     const overlay = scene.overlays.find(o => o.id === id);
     if (overlay) {
       overlay.text = newText;
+      updatePreview();
+    }
+  }
+};
+
+window.updateOverlayProp = (id, prop, value) => {
+  const scene = projectState.scenes.find(s => s.id === projectState.activeSceneId);
+  if (scene && scene.overlays) {
+    const overlay = scene.overlays.find(o => o.id === id);
+    if (overlay) {
+      overlay[prop] = value;
       updatePreview();
     }
   }
@@ -896,8 +940,27 @@ async function performVideoExport(resolution) {
         scene.overlays.forEach(ov => {
           // Escape single quotes and colons for FFmpeg
           let safeText = ov.text.replace(/'/g, "\\'").replace(/:/g, "\\:");
+          
+          let drawtextProps = `fontfile=font.ttf:text='${safeText}':fontsize=${ov.fontSize}:x=(w-text_w)*(${ov.x}/100):y=(h-text_h)*(${ov.y}/100)`;
+          
+          if (ov.color) {
+            let safeColor = ov.color.replace('#', '0x');
+            drawtextProps += `:fontcolor=${safeColor}`;
+          } else {
+            drawtextProps += `:fontcolor=white`;
+          }
+
+          if (ov.bgColor && ov.bgColor !== 'transparent') {
+            let safeBgColor = ov.bgColor;
+            if (safeBgColor === 'rgba(0,0,0,0.7)') safeBgColor = 'black@0.7';
+            else if (safeBgColor === 'rgba(255,255,255,0.7)') safeBgColor = 'white@0.7';
+            else if (safeBgColor.startsWith('#')) safeBgColor = safeBgColor.replace('#', '0x');
+            
+            drawtextProps += `:box=1:boxcolor=${safeBgColor}:boxborderw=8`;
+          }
+
           // Convert percentage to FFmpeg coordinates (w-text_w) * 0.5
-          textFilters += `,drawtext=fontfile=font.ttf:text='${safeText}':fontcolor=white:fontsize=${ov.fontSize}:x=(w-text_w)*(${ov.x}/100):y=(h-text_h)*(${ov.y}/100)`;
+          textFilters += `,drawtext=${drawtextProps}`;
         });
       }
 
@@ -1009,9 +1072,10 @@ function updatePreview() {
         el.style.top = overlay.y + '%';
         el.style.transform = 'translate(-50%, -50%)';
         el.style.color = overlay.color || '#ffffff';
+        el.style.backgroundColor = overlay.bgColor && overlay.bgColor !== 'transparent' ? overlay.bgColor : 'transparent';
         el.style.fontSize = overlay.fontSize + 'px';
         el.style.fontWeight = overlay.fontWeight || 'normal';
-        el.style.fontFamily = 'var(--sans, sans-serif)';
+        el.style.fontFamily = overlay.fontFamily ? `"${overlay.fontFamily}", sans-serif` : 'var(--sans, sans-serif)';
         el.style.textShadow = '1px 1px 4px rgba(0,0,0,0.8)';
         el.style.textAlign = 'center';
         el.style.width = 'max-content';
