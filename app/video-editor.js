@@ -10,6 +10,7 @@ const PIXABAY_API_KEY = "54799067-a3fed06a32d899bc1ede143be";
 // State Management
 let projectState = {
   title: "Başlıksız",
+  subtitlePreset: "default",
   scenes: [
     {
       id: generateId(),
@@ -183,6 +184,8 @@ function bindEvents() {
       document.getElementById('medyaPanelContent').style.display = 'none';
       const metinPanel = document.getElementById('metinPanelContent');
       if(metinPanel) metinPanel.style.display = 'none';
+      const altyaziPanel = document.getElementById('altyazilarPanelContent');
+      if(altyaziPanel) altyaziPanel.style.display = 'none';
       
       if (panel === 'senaryo') {
         document.getElementById('activePanelContent').style.display = 'flex';
@@ -195,6 +198,8 @@ function bindEvents() {
         }
       } else if (panel === 'metin') {
         if(metinPanel) metinPanel.style.display = 'flex';
+      } else if (panel === 'altyazilar') {
+        if(altyaziPanel) altyaziPanel.style.display = 'flex';
       } else {
         // Fallback for others
         document.getElementById('activePanelContent').style.display = 'flex';
@@ -256,6 +261,22 @@ function bindEvents() {
       e.currentTarget.classList.add('active');
       const searchInput = document.getElementById('mediaSearchInput');
       searchAllMedia(searchInput.value || "nature", true);
+    });
+  });
+
+  // Subtitle Presets
+  document.querySelectorAll('.preset-item').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.preset-item').forEach(b => b.classList.remove('active'));
+      
+      // Need to find the closest .preset-item because the user might click the inner preview element
+      const target = e.target.closest('.preset-item');
+      if(target) {
+        target.classList.add('active');
+        const preset = target.getAttribute('data-preset');
+        projectState.subtitlePreset = preset;
+        updatePreview();
+      }
     });
   });
 
@@ -936,7 +957,38 @@ async function performVideoExport(resolution) {
       }
       
       let textFilters = '';
-      if (hasFont && scene.overlays && scene.overlays.length > 0) {
+      if (hasFont) {
+        // Add Subtitle from scene.text
+        if (scene.text && projectState.subtitlePreset !== 'none') {
+           let safeText = scene.text.replace(/'/g, "\\'").replace(/:/g, "\\:");
+           // Font size proportional to video height, positioned at bottom 10%
+           let subProps = `fontfile=font.ttf:text='${safeText}':fontsize=(h*0.04):x=(w-text_w)/2:y=(h-text_h)-(h*0.1)`;
+           
+           switch(projectState.subtitlePreset) {
+             case 'default':
+               subProps += `:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=10`; break;
+             case 'white-box':
+               subProps += `:fontcolor=black:box=1:boxcolor=white:boxborderw=10`; break;
+             case 'black-box':
+               subProps += `:fontcolor=white:box=1:boxcolor=black:boxborderw=10`; break;
+             case 'stroke':
+               subProps += `:fontcolor=white:borderw=3:bordercolor=black`; break;
+             case 'blue-pill':
+               subProps += `:fontcolor=white:box=1:boxcolor=blue:boxborderw=20`; break;
+             case 'comic-yellow':
+               subProps += `:fontcolor=yellow:borderw=4:bordercolor=black`; break;
+             case 'shadow':
+               subProps += `:fontcolor=white:shadowx=3:shadowy=3:shadowcolor=black@0.9`; break;
+             case 'red-box':
+               subProps += `:fontcolor=white:box=1:boxcolor=red:boxborderw=10`; break;
+             default:
+               subProps += `:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=10`; break;
+           }
+           textFilters += `,drawtext=${subProps}`;
+        }
+
+        // Add custom text overlays
+        if (scene.overlays && scene.overlays.length > 0) {
         scene.overlays.forEach(ov => {
           // Escape single quotes and colons for FFmpeg
           let safeText = ov.text.replace(/'/g, "\\'").replace(/:/g, "\\:");
@@ -962,6 +1014,7 @@ async function performVideoExport(resolution) {
           // Convert percentage to FFmpeg coordinates (w-text_w) * 0.5
           textFilters += `,drawtext=${drawtextProps}`;
         });
+        }
       }
 
       // Resize to selected resolution (1080p etc.), set DAR to 16:9, trim to scene.duration, add text overlays
@@ -1054,7 +1107,10 @@ function updatePreview() {
     player.src = '';
   }
 
-  if (activeScene.text) {
+  if (activeScene.text && projectState.subtitlePreset !== 'none') {
+    const presetClass = projectState.subtitlePreset ? `preset-${projectState.subtitlePreset}` : 'preset-default';
+    subtitle.innerHTML = `<div class="subtitle-text ${presetClass}">${activeScene.text}</div>`;
+  } else if (activeScene.text) {
     subtitle.innerHTML = `<div class="subtitle-text">${activeScene.text}</div>`;
   } else {
     subtitle.innerHTML = '';
