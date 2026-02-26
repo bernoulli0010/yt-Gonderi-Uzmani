@@ -12,9 +12,9 @@
   border: 2px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  display:-items: center;
- flex;
-  align  justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px;
   transition: all 0.2s;
 }

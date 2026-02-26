@@ -1110,8 +1110,6 @@ function updatePreview() {
   if (activeScene.text && projectState.subtitlePreset !== 'none') {
     const presetClass = projectState.subtitlePreset ? `preset-${projectState.subtitlePreset}` : 'preset-default';
     subtitle.innerHTML = `<div class="subtitle-text ${presetClass}">${activeScene.text}</div>`;
-  } else if (activeScene.text) {
-    subtitle.innerHTML = `<div class="subtitle-text">${activeScene.text}</div>`;
   } else {
     subtitle.innerHTML = '';
   }
