@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles.css" />
-  <link rel="stylesheet" href="video-editor.css" />
+  <link rel="stylesheet" href="video-editor.css?v=1.0.1" />
 </head>
 
 <body class="editor-layout">
@@ -278,12 +278,13 @@
   <div id="audioPool" style="display:none;"></div>
 
   <!-- FFmpeg.wasm for Browser Video Rendering -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
+  <!-- Important: @ffmpeg/util must be loaded before @ffmpeg/ffmpeg -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
 
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../app/shared-navbar.js"></script>
-  <script src="video-editor.js"></script>
+  <script src="video-editor.js?v=1.0.1"></script>
 </body>
 </html>

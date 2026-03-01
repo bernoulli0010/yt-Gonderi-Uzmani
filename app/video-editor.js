@@ -510,20 +510,31 @@ async function generateTTS(sceneId) {
   }
   
   const btn = document.querySelector(`.scene-item [onclick="generateTTS('${sceneId}')"]`);
+  if (!btn) {
+    console.error("Button not found for TTS");
+    return;
+  }
   const originalHtml = btn.innerHTML;
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`;
   
   try {
-    if (!supabaseClient) throw new Error("Supabase is not initialized.");
+    if (!supabaseClient) {
+      alert("Supabase bağlantısı kurulamadı. Lütfen sayfayı yenileyin.");
+      throw new Error("Supabase is not initialized.");
+    }
+    
+    console.log("Calling TTS function with text:", scene.text.substring(0, 50) + "...");
     
     const { data, error } = await supabaseClient.functions.invoke('minimax-tts', {
       body: { text: scene.text, voice_id: scene.voice }
     });
     
-    if (error) throw error;
-    if (data.error) throw new Error(data.error);
+    console.log("TTS Response:", data, error);
     
-    if (data.data && data.data.audio) {
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    
+    if (data && data.data && data.data.audio) {
       // Audio comes back as hex or base64 based on API. Usually base64 or hex.
       // MiniMax T2A V2 returns hex string in `data.audio`
       const hexString = data.data.audio;
@@ -537,6 +548,9 @@ async function generateTTS(sceneId) {
       const audioUrl = "data:audio/mp3;base64," + b64;
       
       const audioEl = document.getElementById(`audio-${scene.id}`);
+      if (!audioEl) {
+        throw new Error("Audio element not found");
+      }
       audioEl.src = audioUrl;
       
       // Load and update duration
@@ -548,6 +562,9 @@ async function generateTTS(sceneId) {
       
       // Auto-play the generated sound
       audioEl.play();
+      alert("Ses başarıyla oluşturuldu!");
+    } else {
+      throw new Error("Ses verisi alınamadı. Lütfen tekrar deneyin.");
     }
   } catch (err) {
     console.error("TTS Error:", err);
@@ -629,6 +646,9 @@ async function fetchAllMedia(query, limitPerSource = 5, mediaType = 'all') {
 
   const fetchVideos = mediaType === 'all' || mediaType === 'video';
   const fetchImages = mediaType === 'all' || mediaType === 'image';
+  
+  // Pixabay requires minimum per_page of 3
+  const pixabayLimit = Math.max(3, limitPerSource);
 
   // 1. Fetch Pexels Videos
   if (fetchVideos) {
@@ -685,7 +705,7 @@ async function fetchAllMedia(query, limitPerSource = 5, mediaType = 'all') {
 
   // 3. Fetch Pixabay Videos
   if (fetchVideos) {
-    promises.push(fetch(`https://pixabay.com/api/videos/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&per_page=${limitPerSource}&video_type=film`)
+    promises.push(fetch(`https://pixabay.com/api/videos/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&per_page=${pixabayLimit}&video_type=film`)
     .then(res => res.json())
     .then(data => {
       if (data.hits) {
@@ -713,7 +733,7 @@ async function fetchAllMedia(query, limitPerSource = 5, mediaType = 'all') {
 
   // 4. Fetch Pixabay Images
   if (fetchImages) {
-    promises.push(fetch(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${limitPerSource}&orientation=horizontal`)
+    promises.push(fetch(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${pixabayLimit}&orientation=horizontal`)
     .then(res => res.json())
     .then(data => {
       if (data.hits) {
@@ -890,9 +910,11 @@ window.clearSceneMedia = (id) => {
 
 // -- FFmpeg.wasm Export System --
 async function performVideoExport(resolution) {
-  const { FFmpeg } = window.FFmpeg;
-  const { fetchFile } = window.FFmpegUtil;
-  const ffmpeg = new FFmpeg();
+  const { createFFmpeg, fetchFile } = window.FFmpeg;
+  const ffmpeg = createFFmpeg({
+    core: 'https://unpkg.com/@ffmpeg/core@0.12.7/dist/umd/ffmpeg-core.js',
+    wasm: 'https://unpkg.com/@ffmpeg/core@0.12.7/dist/umd/ffmpeg-core.wasm'
+  });
   window.activeFFmpeg = ffmpeg;
 
   const statusEl = document.getElementById('exportStatusText');
@@ -919,10 +941,7 @@ async function performVideoExport(resolution) {
 
   try {
     statusEl.textContent = "FFmpeg Çekirdeği Yükleniyor...";
-    await ffmpeg.load({
-      coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
-      wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm"
-    });
+    await ffmpeg.load();
 
     statusEl.textContent = "Font yükleniyor...";
     let hasFont = false;
